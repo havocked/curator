@@ -33,6 +33,8 @@ tidal queue playlist.json
 
 - `curator sync` currently supports `--only favorites` (Tidal) plus `--dry-run`
 - `curator search` currently supports `--favorited` with `--format text|json|ids`
+- `curator export` currently supports `--format tidal` (track IDs output)
+- `curator filter` currently supports `--familiar` and `--discovery` (favorites-based)
 
 ## Core Principles
 

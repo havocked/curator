@@ -134,3 +134,18 @@ export function getFavoritedTracks(
 
   return rows as FavoritedTrack[];
 }
+
+export function getFavoritedTrackIds(db: Database.Database): number[] {
+  const rows = db
+    .prepare(
+      `
+    SELECT t.tidal_id as id
+    FROM tracks t
+    INNER JOIN taste_signals s ON s.track_id = t.id
+    WHERE s.signal_type = 'favorite' AND s.signal_source = 'tidal'
+  `
+    )
+    .all() as { id: number }[];
+
+  return rows.map((row) => row.id);
+}

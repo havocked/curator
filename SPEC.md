@@ -244,6 +244,8 @@ Found 47 tracks matching: mood=morning, energy=0.3-0.6
 
 Filter a list of tracks (stdin or file).
 
+**MVP status:** Only `--familiar` and `--discovery` are supported (favorites-based).
+
 ```bash
 # Filter out recently played
 cat candidates.json | curator filter --not-played-days 7
@@ -344,6 +346,8 @@ Status: PASSED (1 warning)
 ### `curator export`
 
 Export playlist in various formats.
+
+**MVP status:** Only `--format tidal` is supported.
 
 ```bash
 # Export as Tidal track IDs (for tidal queue)
