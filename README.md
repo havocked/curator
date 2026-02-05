@@ -29,6 +29,10 @@ curator validate playlist.json
 tidal queue playlist.json
 ```
 
+### MVP status
+
+- `curator sync` currently supports `--only favorites` (Tidal) plus `--dry-run`
+
 ## Core Principles
 
 ### 1. Separation of Concerns

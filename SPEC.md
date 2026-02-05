@@ -118,6 +118,8 @@ CREATE TABLE playlist_tracks (
 
 Sync library data from Tidal.
 
+**MVP status:** Only `--only favorites` and `--dry-run` are implemented so far.
+
 ```bash
 # Full sync (favorites, history, mixes)
 curator sync --source tidal
