@@ -199,6 +199,8 @@ curator profile --period 2025-12
 
 Find tracks matching criteria.
 
+**MVP status:** Only `--favorited` is supported (outputs text/json/ids).
+
 ```bash
 # Search by mood/genre
 curator search --mood morning

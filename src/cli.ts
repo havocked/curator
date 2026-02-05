@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { registerSearchCommand } from "./commands/search";
 import { registerSyncCommand } from "./commands/sync";
 
 const program = new Command();
@@ -11,6 +12,7 @@ program
   .version("1.0.0");
 
 registerSyncCommand(program);
+registerSearchCommand(program);
 
 program.parseAsync(process.argv).catch((error) => {
   const message = error instanceof Error ? error.message : String(error);

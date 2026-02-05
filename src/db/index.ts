@@ -10,6 +10,14 @@ export type SyncFavoritesResult = {
   totalTracks: number;
 };
 
+export type FavoritedTrack = {
+  id: number;
+  title: string;
+  artist: string | null;
+  album: string | null;
+  duration: number | null;
+};
+
 export function openDatabase(dbPath: string): Database.Database {
   if (dbPath !== ":memory:") {
     const directory = path.dirname(dbPath);
@@ -100,4 +108,29 @@ export function syncFavoriteTracks(
     favoriteSignals,
     totalTracks: totalRow.count,
   };
+}
+
+export function getFavoritedTracks(
+  db: Database.Database,
+  limit?: number
+): FavoritedTrack[] {
+  const baseQuery = `
+    SELECT
+      t.tidal_id as id,
+      t.title as title,
+      t.artist_name as artist,
+      t.album_name as album,
+      t.duration_seconds as duration
+    FROM tracks t
+    INNER JOIN taste_signals s ON s.track_id = t.id
+    WHERE s.signal_type = 'favorite' AND s.signal_source = 'tidal'
+    ORDER BY t.artist_name, t.title
+  `;
+
+  const useLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0;
+  const query = useLimit ? `${baseQuery} LIMIT ?` : baseQuery;
+  const stmt = db.prepare(query);
+  const rows = useLimit ? stmt.all(limit) : stmt.all();
+
+  return rows as FavoritedTrack[];
 }
