@@ -273,6 +273,8 @@ curator search --mood evening | \
 
 Order tracks with musical logic.
 
+**MVP status:** Only `--arc flat` and `--by tempo|key` are supported.
+
 ```bash
 # Arrange by energy arc
 curator arrange tracks.json --arc gentle_rise

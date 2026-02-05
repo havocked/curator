@@ -35,6 +35,7 @@ tidal queue playlist.json
 - `curator search` currently supports `--favorited` with `--format text|json|ids`
 - `curator export` currently supports `--format tidal` (track IDs output)
 - `curator filter` currently supports `--familiar` and `--discovery` (favorites-based)
+- `curator arrange` currently supports `--arc flat` and `--by tempo|key`
 
 ## Core Principles
 
