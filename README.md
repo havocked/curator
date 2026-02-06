@@ -53,6 +53,7 @@ See [LESSONS.md](./LESSONS.md) for the full case study.
 - ✅ `curator search --favorited --format json|text|ids` - Query favorites WITH audio features
 - ✅ `curator discover --playlist <id>` - Discover new tracks from a Tidal playlist
 - ✅ `curator discover --genre <g> --tags <t>` - Discover from playlist search (genre/tag)
+- ✅ `curator discover --artists "Justice,Daft Punk"` - Discover top tracks per artist
 - ✅ `curator filter --familiar|--discovery` - Separate known vs new tracks
 - ✅ `curator arrange --arc gentle_rise` - **REAL intelligent BPM-based arrangement**
 - ✅ `curator export --format tidal` - Output track IDs for Tidal API
