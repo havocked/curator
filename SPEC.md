@@ -8,6 +8,37 @@ Curator is a CLI toolkit for music curation. It syncs with Tidal, builds taste p
 
 ---
 
+## Current Implementation Status
+
+**Last Updated:** February 6, 2026
+
+### Audio Features Coverage ✅
+
+Tested Tidal API on 50 favorite tracks:
+- **94%** have BPM data (47/50)
+- **88%** have Key data (44/50)
+- **88%** have BOTH BPM + Key (44/50)
+- **6%** have neither (3/50)
+
+**Conclusion:** Tidal provides excellent audio feature coverage. Smart playlist curation is possible with Tidal data alone, without external APIs.
+
+**Full Report:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md)
+
+### MVP Commands Implemented
+- ✅ `sync` - Tidal favorites sync (favorites only for now)
+- ✅ `search` - Query favorites with multiple output formats
+- ✅ `filter` - Familiar vs discovery separation
+- ✅ `export` - Output to Tidal IDs for playback
+- ⚠️ `arrange` - Infrastructure exists, needs smart implementation
+
+### Next Implementation Priority
+1. **Update sync** - Extract and store BPM/Key from Tidal during sync
+2. **Implement gentle_rise** - Use real audio features for energy arc arrangement
+3. **Add tempo smoothing** - Prevent jarring transitions (>15 BPM jumps)
+4. **Key compatibility** - Circle of Fifths logic for harmonic flow
+
+---
+
 ## Architecture
 
 ```
@@ -48,16 +79,22 @@ CREATE TABLE tracks (
     synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Audio features (future: from analysis)
+-- Audio features (from Tidal API + optional Spotify enrichment)
 CREATE TABLE audio_features (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id),
-    bpm REAL,
-    key TEXT,              -- e.g., "C major", "A minor"
+    bpm REAL,              -- From Tidal (94% coverage)
+    key TEXT,              -- From Tidal (88% coverage) - e.g., "Eb", "A"
+    key_scale TEXT,        -- From Tidal - "MAJOR" or "MINOR"
+    peak REAL,             -- From Tidal - loudness peak (0.0 - 1.0)
+    source TEXT,           -- 'tidal', 'spotify', 'essentia'
+    
+    -- Extended features (optional, from Spotify/Essentia)
     energy REAL,           -- 0.0 - 1.0
     danceability REAL,     -- 0.0 - 1.0
     valence REAL,          -- 0.0 (sad) - 1.0 (happy)
     acousticness REAL,     -- 0.0 - 1.0
     instrumentalness REAL, -- 0.0 - 1.0
+    
     analyzed_at DATETIME
 );
 
@@ -271,35 +308,38 @@ curator search --mood evening | \
 
 ### `curator arrange`
 
-Order tracks with musical logic.
+Order tracks with musical logic using real audio features (BPM, Key from Tidal).
 
-**MVP status:** Only `--arc flat` and `--by tempo|key` are supported.
+**Current Status:** ⚠️ Infrastructure exists, but only basic sorting implemented
+- ✅ CLI interface working
+- ✅ JSON input/output pipeline
+- ❌ Smart arrangement logic - **NEEDS IMPLEMENTATION**
+
+**What Needs to Be Built:**
 
 ```bash
-# Arrange by energy arc
-curator arrange tracks.json --arc gentle_rise
-curator arrange tracks.json --arc peak_middle
-curator arrange tracks.json --arc wind_down
-
-# Arrange by key (circle of fifths)
-curator arrange tracks.json --by key
-
-# Arrange by tempo (smooth transitions)
-curator arrange tracks.json --by tempo
-
-# Combined arrangement
-curator arrange tracks.json --arc gentle_rise --smooth-tempo --smooth-key
-
-# Custom energy curve
-curator arrange tracks.json --energy-curve "0.3,0.5,0.7,0.6,0.4"
+# Target usage (once implemented):
+curator arrange tracks.json --arc gentle_rise   # Energy-based ordering
+curator arrange tracks.json --by tempo          # Smooth tempo transitions
+curator arrange tracks.json --by key            # Circle of fifths compatibility
 ```
 
-**Energy arc presets:**
-- `flat` — Consistent energy throughout
-- `gentle_rise` — 0.3 → 0.5 → 0.6 (morning, focus)
-- `peak_middle` — 0.4 → 0.7 → 0.5 (dinner party)
-- `wind_down` — 0.6 → 0.4 → 0.3 (evening)
-- `workout` — 0.5 → 0.8 → 0.9 → 0.7 (exercise)
+**Planned Energy Arc Presets:**
+- `gentle_rise` — Start low (75-90 BPM) → build (120-140 BPM) → wind down (85-95 BPM)
+- `peak_middle` — Moderate → High → Moderate (dinner party energy curve)
+- `wind_down` — High → Moderate → Low (evening, pre-sleep)
+- `workout` — Build intensity gradually, sustain peak, cool down
+
+**Implementation Requirements:**
+1. **Tempo smoothing:** No >15 BPM jumps between consecutive tracks
+2. **Energy grouping:** Bucket tracks by BPM ranges (low/mid/high)
+3. **Arc construction:** Arrange buckets according to preset pattern
+4. **Key compatibility:** Use Circle of Fifths for harmonic transitions (C → G → D, not C → F#)
+
+**Data Available from Tidal:**
+- BPM: 94% coverage (sufficient for tempo-based arrangement)
+- Key: 88% coverage (sufficient for key-based arrangement)
+- Peak: 100% coverage (loudness normalization)
 
 ---
 

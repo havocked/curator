@@ -29,13 +29,31 @@ curator validate playlist.json
 tidal queue playlist.json
 ```
 
-### MVP status
+## Current Status
 
-- `curator sync` currently supports `--only favorites` (Tidal) plus `--dry-run`
-- `curator search` currently supports `--favorited` with `--format text|json|ids`
-- `curator export` currently supports `--format tidal` (track IDs output)
-- `curator filter` currently supports `--familiar` and `--discovery` (favorites-based)
-- `curator arrange` currently supports `--arc flat` and `--by tempo|key`
+### ✅ Working Commands (MVP)
+- `curator sync --source tidal --only favorites` - Syncs favorites from Tidal (with `--dry-run`)
+- `curator search --favorited --format json|text|ids` - Query synced favorites
+- `curator filter --familiar|--discovery` - Separate known vs new tracks
+- `curator export --format tidal` - Output track IDs for playback
+
+### 🚧 In Progress
+- `curator arrange` - Currently basic sorting only, needs smart implementation:
+  - ✅ Infrastructure in place
+  - ❌ Real energy arc logic (gentle_rise, etc.) - **needs implementation**
+  - ❌ Tempo smoothing (<15 BPM transitions) - **needs implementation**
+  - ❌ Key compatibility (Circle of Fifths) - **needs implementation**
+
+### 📋 Next Steps
+1. **Update sync command** - Store BPM/Key from Tidal in database
+2. **Implement gentle_rise arc** - Use real audio features for intelligent ordering
+3. **Add tempo smoothing** - Prevent jarring BPM jumps
+4. **Build more arcs** - peak_and_fade, rollercoaster, etc.
+
+### 📊 Data Status
+- **Tidal audio features:** 94% BPM, 88% Key coverage (tested on 50 favorites)
+- **Database:** Tracks and favorites synced, audio features not yet stored
+- **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for full analysis
 
 ## Core Principles
 
@@ -82,22 +100,22 @@ No random shuffling. Playlists are built from:
 
 ## Data Sources
 
-### From Tidal (v1)
-- Favorites (with timestamps)
-- Listening history mixes (monthly breakdowns)
-- Personal mixes (My Mix 1-5, Daily Discovery)
-- Recently played
-- User playlists
+### From Tidal (Primary) ✅
+**94% coverage** of audio features - better than expected!
 
-### From MusicBrainz (enrichment)
-- Genre tags
-- Mood labels
-- Related artists
+- **Favorites** (with timestamps)
+- **Audio features:** BPM (94%), Key (88%) - directly from Tidal API
+- **Track metadata:** Artist, album, duration, ISRC
+- **Listening history:** Personal mixes (My Mix 1-5, Daily Discovery)
+- User playlists, recently played
 
-### Future (v2+)
-- Audio feature analysis (Essentia/librosa)
-- BPM, key, energy extraction
-- Spectral analysis
+**Coverage Report:** See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md)
+
+### Future Enhancements (v2+)
+- **Spotify API** (optional): Fill gaps for the 6% of tracks without Tidal features
+- **Advanced features:** Energy, danceability, valence (via Spotify)
+- **MusicBrainz:** Genre tags, mood labels (enrichment)
+- **Local analysis:** Essentia/librosa for custom audio analysis
 
 ## Installation
 
