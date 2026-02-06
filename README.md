@@ -37,6 +37,7 @@ tidal queue playlist.json
 - ✅ `curator sync --source tidal --only favorites` - Syncs favorites WITH audio features (BPM, Key)
 - ✅ `curator search --favorited --format json|text|ids` - Query favorites WITH audio features
 - ✅ `curator discover --playlist <id>` - Discover new tracks from a Tidal playlist
+- ✅ `curator discover --genre <g> --tags <t>` - Discover from playlist search (genre/tag)
 - ✅ `curator filter --familiar|--discovery` - Separate known vs new tracks
 - ✅ `curator arrange --arc gentle_rise` - **REAL intelligent BPM-based arrangement**
 - ✅ `curator export --format tidal` - Output track IDs for Tidal API
@@ -59,16 +60,17 @@ curator search --favorited --limit 20 --format json | \
 
 ### 🚧 Phase 3: Discovery (In Progress)
 
-**Current Limitation:** Genre/tag discovery still missing (only playlist IDs supported)
+**Current Limitation:** Caching + advanced sources still missing
 
 **Phase 3 Goal:** Discover NEW tracks from Tidal's catalog based on criteria
 
-**Current Command (Step 1):**
+**Current Commands (Step 1 & 2):**
 ```bash
 curator discover --playlist <playlist-id> --limit 30
+curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
 ```
 
-**Next Command (Step 2):**
+**Next Command (Step 3):**
 ```bash
 curator discover \
   --genre "hip-hop" \

@@ -1,11 +1,16 @@
 import { Command } from "commander";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
-import { fetchPlaylistTracksDirect } from "../services/tidalDirect";
+import {
+  fetchPlaylistTracksDirect,
+  searchPlaylistsDirect,
+} from "../services/tidalDirect";
 import type { TidalTrack } from "../services/tidalService";
 
 type DiscoverOptions = {
   playlist?: string;
+  genre?: string;
+  tags?: string;
   limit?: number;
   format?: string;
   via?: string;
@@ -15,6 +20,14 @@ type DiscoverOptions = {
 };
 
 type DiscoverFormat = "json" | "text" | "ids";
+
+type DiscoverQuery = {
+  playlist?: string;
+  genre?: string;
+  tags?: string[];
+  limit: number;
+  playlistIds?: string[];
+};
 
 function normalizeFormat(value: string | undefined): DiscoverFormat {
   const normalized = (value ?? "json").toLowerCase();
@@ -29,6 +42,55 @@ function normalizeLimit(value: number | undefined): number {
     return 50;
   }
   return Math.floor(value);
+}
+
+export function parseTags(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter((tag) => tag.length > 0);
+}
+
+export function buildPlaylistQueries(
+  genre: string | undefined,
+  tags: string[]
+): string[] {
+  const queries: string[] = [];
+  const normalizedGenre = genre?.trim();
+  if (normalizedGenre) {
+    queries.push(normalizedGenre);
+  }
+
+  for (const tag of tags) {
+    if (normalizedGenre) {
+      queries.push(`${normalizedGenre} ${tag}`);
+    }
+    queries.push(tag);
+  }
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const query of queries) {
+    const key = query.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(query);
+  }
+  return unique;
+}
+
+export function dedupeTracks(tracks: TidalTrack[]): TidalTrack[] {
+  const seen = new Set<number>();
+  const unique: TidalTrack[] = [];
+  for (const track of tracks) {
+    if (seen.has(track.id)) continue;
+    seen.add(track.id);
+    unique.push(track);
+  }
+  return unique;
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -60,16 +122,19 @@ export function formatDiscoverAsText(
 }
 
 export function formatDiscoverAsJson(
-  playlistId: string,
+  query: DiscoverQuery,
   tracks: TidalTrack[],
   limit: number
 ): string {
   const output = {
     count: tracks.length,
-    source: "playlist",
+    source: query.playlist ? "playlist" : "playlist-search",
     query: {
-      playlist: playlistId,
+      playlist: query.playlist,
+      genre: query.genre,
+      tags: query.tags,
       limit,
+      playlists: query.playlistIds,
     },
     tracks: tracks.map((track) => ({
       id: track.id,
@@ -103,33 +168,83 @@ function normalizeVia(value: string | undefined): "direct" {
 }
 
 export async function runDiscover(options: DiscoverOptions): Promise<void> {
-  if (!options.playlist) {
-    throw new Error("Only --playlist <id> is supported right now.");
-  }
-
   const format = normalizeFormat(options.format);
   const limit = normalizeLimit(options.limit);
   const config = loadConfig();
   normalizeVia(options.via);
 
-  const response = await fetchPlaylistTracksDirect({
-    sessionPath: options.sessionPath ?? config.tidal.session_path,
-    pythonPath: options.pythonPath ?? config.tidal.python_path,
-    playlistId: options.playlist,
-    limit,
-  });
+  const sessionPath = options.sessionPath ?? config.tidal.session_path;
+  const pythonPath = options.pythonPath ?? config.tidal.python_path;
 
-  const tracks = response.tracks.slice(0, limit);
+  let playlistId: string | undefined;
+  let playlistIds: string[] | undefined;
+  let tracks: TidalTrack[] = [];
+
+  if (options.playlist) {
+    playlistId = options.playlist;
+    const response = await fetchPlaylistTracksDirect({
+      sessionPath,
+      pythonPath,
+      playlistId,
+      limit,
+    });
+    tracks = response.tracks.slice(0, limit);
+  } else {
+    const tags = parseTags(options.tags);
+    const genre = options.genre?.trim();
+    if (!genre && tags.length === 0) {
+      throw new Error("Provide --playlist or --genre/--tags to discover tracks.");
+    }
+
+    const queries = buildPlaylistQueries(genre, tags);
+    const playlistIdSet = new Set<string>();
+    const MAX_PLAYLISTS = 6;
+    for (const query of queries) {
+      if (playlistIdSet.size >= MAX_PLAYLISTS) break;
+      const playlists = await searchPlaylistsDirect({
+        sessionPath,
+        pythonPath,
+        query,
+        playlistLimit: 5,
+      });
+      for (const playlist of playlists) {
+        if (playlistIdSet.size >= MAX_PLAYLISTS) break;
+        playlistIdSet.add(playlist.id);
+      }
+    }
+
+    playlistIds = Array.from(playlistIdSet);
+    if (playlistIds.length === 0) {
+      throw new Error("No playlists found for the provided genre/tags.");
+    }
+
+    const collected: TidalTrack[] = [];
+    for (const id of playlistIds) {
+      if (collected.length >= limit) break;
+      const response = await fetchPlaylistTracksDirect({
+        sessionPath,
+        pythonPath,
+        playlistId: id,
+        limit,
+      });
+      collected.push(...response.tracks);
+    }
+    tracks = dedupeTracks(collected).slice(0, limit);
+  }
+
   const db = openDatabase(config.database.path);
+  const discoveredVia = playlistId
+    ? `playlist:${playlistId}`
+    : `playlist-search:${(options.genre ?? "unknown").toLowerCase()}`;
   try {
     applySchema(db);
-    upsertDiscoveredTracks(db, tracks, `playlist:${response.playlist_id}`);
+    upsertDiscoveredTracks(db, tracks, discoveredVia);
   } finally {
     db.close();
   }
 
   if (format === "text") {
-    console.log(formatDiscoverAsText(response.playlist_id, tracks));
+    console.log(formatDiscoverAsText(playlistId ?? "playlist-search", tracks));
     return;
   }
 
@@ -141,7 +256,23 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     return;
   }
 
-  console.log(formatDiscoverAsJson(response.playlist_id, tracks, limit));
+  const query: DiscoverQuery = { limit };
+  const tags = parseTags(options.tags);
+  if (playlistId) {
+    query.playlist = playlistId;
+  }
+  const genre = options.genre?.trim();
+  if (genre) {
+    query.genre = genre;
+  }
+  if (tags.length > 0) {
+    query.tags = tags;
+  }
+  if (playlistIds && playlistIds.length > 0) {
+    query.playlistIds = playlistIds;
+  }
+
+  console.log(formatDiscoverAsJson(query, tracks, limit));
 }
 
 export function registerDiscoverCommand(program: Command): void {
@@ -149,6 +280,8 @@ export function registerDiscoverCommand(program: Command): void {
     .command("discover")
     .description("Discover new tracks from Tidal catalog")
     .option("--playlist <id>", "Discover tracks from a playlist ID")
+    .option("--genre <genre>", "Discover tracks by genre (playlist search)")
+    .option("--tags <tags>", "Comma-separated tags for playlist search")
     .option("--limit <count>", "Limit results (default: 50)", (value) => Number.parseInt(value, 10))
     .option("--format <format>", "Output format (json|text|ids)", "json")
     .option("--via <mode>", "Discovery mode (direct)", "direct")

@@ -318,7 +318,7 @@ Found 47 tracks matching: mood=morning, energy=0.3-0.6
 
 Discover new tracks outside your favorites.
 
-**MVP status:** Only `--playlist <id>` is supported (direct Tidal session).
+**MVP status:** `--playlist <id>` and `--genre/--tags` are supported (direct Tidal session).
 
 ```bash
 # Discover tracks from a specific Tidal playlist
@@ -329,6 +329,9 @@ curator discover --playlist <playlist-id> --format json
 
 # Output track IDs
 curator discover --playlist <playlist-id> --format ids
+
+# Discover from playlist search by genre/tags
+curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
 ```
 
 ---

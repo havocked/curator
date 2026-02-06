@@ -92,7 +92,7 @@ def load_session(session_path: str):
     if not session.check_login():
         raise RuntimeError("Tidal session is not logged in or has expired.")
 
-    return session
+    return session, tidalapi
 
 
 def main() -> int:
@@ -102,11 +102,40 @@ def main() -> int:
     parser.add_argument(
         "--playlist-id", help="Fetch tracks from a specific playlist ID"
     )
+    parser.add_argument(
+        "--search-playlists", help="Search playlists by keyword"
+    )
+    parser.add_argument(
+        "--playlist-limit", type=int, default=5, help="Max playlists to return"
+    )
     args = parser.parse_args()
 
     try:
-        session = load_session(args.session_path)
-        if args.playlist_id:
+        session, tidalapi = load_session(args.session_path)
+        if args.search_playlists:
+            search_results = session.search(
+                args.search_playlists, models=[tidalapi.Playlist]
+            )
+            playlists = []
+            if isinstance(search_results, dict):
+                playlists = search_results.get("playlists") or []
+            elif hasattr(search_results, "playlists"):
+                playlists = getattr(search_results, "playlists")
+            items = []
+            for playlist in playlists[: args.playlist_limit]:
+                items.append(
+                    {
+                        "id": playlist.id,
+                        "title": playlist.name,
+                        "description": getattr(playlist, "description", "") or "",
+                    }
+                )
+            payload = {
+                "query": args.search_playlists,
+                "count": len(items),
+                "playlists": items,
+            }
+        elif args.playlist_id:
             playlist = session.playlist(args.playlist_id)
             tracks = playlist.tracks()
             if args.limit and args.limit > 0:

@@ -82,3 +82,36 @@ export async function fetchPlaylistTracksDirect(
     throw new Error(`Direct playlist fetch failed: ${message.trim()}`);
   }
 }
+
+export async function searchPlaylistsDirect(
+  options: DirectTidalOptions & { query: string; playlistLimit?: number }
+): Promise<Array<{ id: string; title: string; description: string }>> {
+  const helperPath = resolveHelperPath();
+  const args = [
+    helperPath,
+    "--session-path",
+    options.sessionPath,
+    "--search-playlists",
+    options.query,
+    "--playlist-limit",
+    String(options.playlistLimit ?? 5),
+  ];
+
+  try {
+    const { stdout } = await execFileAsync(options.pythonPath, args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const payload = JSON.parse(stdout) as {
+      playlists?: Array<{ id: string; title: string; description: string }>;
+    };
+    return Array.isArray(payload.playlists) ? payload.playlists : [];
+  } catch (error) {
+    const message =
+      error instanceof Error && "stderr" in error
+        ? String((error as { stderr?: string }).stderr ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    throw new Error(`Direct playlist search failed: ${message.trim()}`);
+  }
+}
