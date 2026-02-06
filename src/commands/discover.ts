@@ -3,7 +3,9 @@ import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import {
   fetchPlaylistTracksDirect,
+  fetchArtistTopTracksDirect,
   searchPlaylistsDirect,
+  searchArtistsDirect,
 } from "../services/tidalDirect";
 import type { TidalTrack } from "../services/tidalService";
 
@@ -11,6 +13,8 @@ type DiscoverOptions = {
   playlist?: string;
   genre?: string;
   tags?: string;
+  artists?: string;
+  limitPerArtist?: number;
   limit?: number;
   format?: string;
   via?: string;
@@ -25,6 +29,7 @@ type DiscoverQuery = {
   playlist?: string;
   genre?: string;
   tags?: string[];
+  artists?: string[];
   limit: number;
   playlistIds?: string[];
 };
@@ -44,6 +49,13 @@ function normalizeLimit(value: number | undefined): number {
   return Math.floor(value);
 }
 
+function normalizeLimitPerArtist(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 5;
+  }
+  return Math.floor(value);
+}
+
 export function parseTags(value: string | undefined): string[] {
   if (!value) {
     return [];
@@ -52,6 +64,16 @@ export function parseTags(value: string | undefined): string[] {
     .split(",")
     .map((tag) => tag.trim().toLowerCase())
     .filter((tag) => tag.length > 0);
+}
+
+export function parseArtists(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
 }
 
 export function buildPlaylistQueries(
@@ -91,6 +113,42 @@ export function dedupeTracks(tracks: TidalTrack[]): TidalTrack[] {
     unique.push(track);
   }
   return unique;
+}
+
+async function discoverByArtists(
+  names: string[],
+  limitPerArtist: number,
+  sessionPath: string,
+  pythonPath: string
+): Promise<TidalTrack[]> {
+  const collected: TidalTrack[] = [];
+
+  for (const name of names) {
+    const artists = await searchArtistsDirect({
+      sessionPath,
+      pythonPath,
+      query: name,
+      artistLimit: 1,
+    });
+
+    if (artists.length === 0) {
+      continue;
+    }
+
+    const artist = artists[0];
+    if (!artist) {
+      continue;
+    }
+    const tracks = await fetchArtistTopTracksDirect({
+      sessionPath,
+      pythonPath,
+      artistId: artist.id,
+      limit: limitPerArtist,
+    });
+    collected.push(...tracks);
+  }
+
+  return dedupeTracks(collected);
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -178,9 +236,27 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
 
   let playlistId: string | undefined;
   let playlistIds: string[] | undefined;
+  let artistNames: string[] | undefined;
   let tracks: TidalTrack[] = [];
 
-  if (options.playlist) {
+  if (options.artists) {
+    artistNames = parseArtists(options.artists);
+    if (artistNames.length === 0) {
+      throw new Error("Provide at least one artist name.");
+    }
+
+    const limitPerArtist = normalizeLimitPerArtist(options.limitPerArtist);
+    tracks = await discoverByArtists(
+      artistNames,
+      limitPerArtist,
+      sessionPath,
+      pythonPath
+    );
+    if (tracks.length === 0) {
+      throw new Error("No tracks found for the provided artists.");
+    }
+    tracks = tracks.slice(0, limit);
+  } else if (options.playlist) {
     playlistId = options.playlist;
     const response = await fetchPlaylistTracksDirect({
       sessionPath,
@@ -235,6 +311,8 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   const db = openDatabase(config.database.path);
   const discoveredVia = playlistId
     ? `playlist:${playlistId}`
+    : artistNames
+      ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
     : `playlist-search:${(options.genre ?? "unknown").toLowerCase()}`;
   try {
     applySchema(db);
@@ -261,6 +339,9 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   if (playlistId) {
     query.playlist = playlistId;
   }
+  if (artistNames && artistNames.length > 0) {
+    query.artists = artistNames;
+  }
   const genre = options.genre?.trim();
   if (genre) {
     query.genre = genre;
@@ -282,6 +363,12 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--playlist <id>", "Discover tracks from a playlist ID")
     .option("--genre <genre>", "Discover tracks by genre (playlist search)")
     .option("--tags <tags>", "Comma-separated tags for playlist search")
+    .option("--artists <names>", "Comma-separated artist names")
+    .option(
+      "--limit-per-artist <count>",
+      "Max tracks per artist (default: 5)",
+      (value) => Number.parseInt(value, 10)
+    )
     .option("--limit <count>", "Limit results (default: 50)", (value) => Number.parseInt(value, 10))
     .option("--format <format>", "Output format (json|text|ids)", "json")
     .option("--via <mode>", "Discovery mode (direct)", "direct")
