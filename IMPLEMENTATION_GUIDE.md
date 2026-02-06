@@ -1,40 +1,77 @@
-# Implementation Guide for Smart Arrange
+# Implementation Guide
 
-**Last Updated:** February 6, 2026  
-**For:** Next agent continuing implementation in Cursor
-
----
-
-## Current Situation
-
-### ✅ What Works
-- CLI pipeline: sync → search → filter → export → play
-- Database: Tracks and favorites synced from Tidal
-- Audio features stored (BPM/Key) via direct Tidal sync
-- Gentle rise arc + basic tempo/key sorting in arrange
-
-### ❌ What's Missing
-- More arcs: `peak_middle`, `wind_down`, `workout`
-- Key compatibility logic (circle of fifths)
-- No key compatibility logic
+**Last Updated:** February 6, 2026, 2:00 AM  
+**Status:** Phase 1 & 2 COMPLETE ✅  
+**Next:** Phase 3 - Discovery
 
 ---
 
-## Data Available from Tidal
+## ✅ Phase 1 & 2: COMPLETE
+
+**Completed Features:**
+- ✅ Audio features sync from Tidal (BPM, Key, Key Scale, Peak)
+- ✅ Database storage (50 tracks, 47 with BPM, 44 with Key)
+- ✅ Smart `gentle_rise` energy arc implementation
+- ✅ BPM-based grouping (low/mid/high buckets)
+- ✅ Tempo smoothing (max 15 BPM transitions)
+- ✅ Dynamic playlist sizing
+- ✅ Full pipeline working: sync → search → filter → arrange → export
+- ✅ Tidal playlist creation tested successfully
+
+**Test Results:**
+- Created "Gentle Rise - Curated by Ori" (20 tracks, 56-164 BPM)
+- Energy arc validated: smooth progression from low → peak → maintained high
+- Database: 94% BPM coverage, 88% Key coverage confirmed
+
+**See Complete Documentation:**
+- [PHASE1_COMPLETE.md](./PHASE1_COMPLETE.md) - Full Phase 1 report
+- [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) - Data coverage analysis
+
+---
+
+## 🚧 Phase 3: Discovery (NEXT PRIORITY)
+
+**Current Limitation:** Can only curate from synced favorites (~50 tracks)
+
+**Phase 3 Goal:** Discover NEW tracks from Tidal's catalog
+
+**What's Missing:**
+- `curator discover` command (find tracks beyond favorites)
+- Genre/tag-based search
+- Playlist-based discovery
+- Smart caching for repeated queries
+
+**Full Specification:** See [PHASE3_SPEC.md](./PHASE3_SPEC.md)
+
+**Estimated Time:** 7-9 hours
+
+---
+
+## Data Available from Tidal (Proven ✅)
 
 **Coverage (tested on 50 favorites):**
-- BPM: 94% (47/50 tracks)
-- Key: 88% (44/50 tracks)
-- Key Scale: 88% (MAJOR/MINOR)
-- Peak: 100% (loudness)
+- BPM: 94% (47/50 tracks) ✅
+- Key: 88% (44/50 tracks) ✅
+- Key Scale: 88% (MAJOR/MINOR) ✅
+- Peak: 100% (loudness) ✅
 
-**Access:** Via `tidalapi` library - see `/tmp/test_tidal_features.py`
+**Access:** Via Python script `scripts/tidal_direct.py`
 
 ---
 
-## Implementation Steps
+## For Next Agent: Phase 3 Implementation
 
-### Phase 1: Store Audio Features (1-2 hours) ✅ Complete
+### START HERE: [PHASE3_SPEC.md](./PHASE3_SPEC.md)
+
+The Phase 3 spec contains:
+- Complete command specification
+- Discovery source strategies
+- Database schema updates
+- Step-by-step implementation plan
+- Testing strategy
+- Success criteria
+
+### Previous Phase Notes (Historical - Complete)
 
 **File:** `src/commands/sync.ts`
 

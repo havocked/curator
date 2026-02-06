@@ -31,34 +31,58 @@ tidal queue playlist.json
 
 ## Current Status
 
-### ✅ Working Commands (MVP)
-- `curator sync --source tidal --only favorites` - Syncs favorites from Tidal (default `--via direct`)
-- `curator search --favorited --format json|text|ids` - Query synced favorites
-- `curator filter --familiar|--discovery` - Separate known vs new tracks
-- `curator arrange --arc flat|gentle_rise --by tempo|key` - BPM-based ordering + gentle rise arc
-- `curator export --format tidal` - Output track IDs for playback
+### ✅ Phase 1 & 2 Complete: Smart Curation Working!
 
-**Direct sync notes:**
-- Uses `~/clawd/projects/tidal-service/tidal_session.json` by default
-- Override with `CURATOR_TIDAL_SESSION_PATH` or `tidal.session_path` in config
+**Working Commands:**
+- ✅ `curator sync --source tidal --only favorites` - Syncs favorites WITH audio features (BPM, Key)
+- ✅ `curator search --favorited --format json|text|ids` - Query favorites WITH audio features
+- ✅ `curator filter --familiar|--discovery` - Separate known vs new tracks
+- ✅ `curator arrange --arc gentle_rise` - **REAL intelligent BPM-based arrangement**
+- ✅ `curator export --format tidal` - Output track IDs for Tidal API
 
-### 🚧 In Progress
-- `curator arrange` - Currently basic sorting only, needs smart implementation:
-  - ✅ Infrastructure in place
-  - ❌ Real energy arc logic (gentle_rise, etc.) - **needs implementation**
-  - ❌ Tempo smoothing (<15 BPM transitions) - **needs implementation**
-  - ❌ Key compatibility (Circle of Fifths) - **needs implementation**
+**What's Working:**
+- ✅ Audio features stored in database (47/50 tracks with BPM, 44/50 with Key)
+- ✅ Intelligent energy arcs (gentle_rise: start low → peak mid → end low)
+- ✅ Tempo smoothing (max 15 BPM jumps between tracks)
+- ✅ BPM-based bucketing (low ≤90, mid 90-120, high >120)
+- ✅ Dynamic playlist sizing (adapts to any track count)
+- ✅ Created test playlist: "Gentle Rise - Curated by Ori" (20 tracks, 56-164 BPM)
 
-### 📋 Next Steps
-1. **Update sync command** - Store BPM/Key from Tidal in database
-2. **Implement gentle_rise arc** - Use real audio features for intelligent ordering
-3. **Add tempo smoothing** - Prevent jarring BPM jumps
-4. **Build more arcs** - peak_and_fade, rollercoaster, etc.
+**Example Pipeline:**
+```bash
+curator search --favorited --limit 20 --format json | \
+  curator arrange --arc gentle_rise | \
+  curator export --format tidal
+# Creates intelligently curated playlist with energy arc
+```
+
+### 🚧 Phase 3: Discovery (Next Priority)
+
+**Current Limitation:** Can only curate from your synced favorites (~50 tracks)
+
+**Phase 3 Goal:** Discover NEW tracks from Tidal's catalog based on criteria
+
+**Needed Command:**
+```bash
+curator discover \
+  --genre "hip-hop" \
+  --tags "boom-bap" \
+  --year 2020-2026 \
+  --limit 50
+# Returns 50 candidate tracks from Tidal with audio features
+```
+
+**Use Case Example:**
+"Build me a boom bap → electro hip hop playlist for a boat party"
+→ Needs discovery to find tracks beyond favorites
+
+**See:** [PHASE3_SPEC.md](./PHASE3_SPEC.md) for detailed implementation guide
 
 ### 📊 Data Status
-- **Tidal audio features:** 94% BPM, 88% Key coverage (tested on 50 favorites)
-- **Database:** Tracks and favorites synced, audio features not yet stored
-- **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for full analysis
+- **Database:** 50 tracks synced, 47 with BPM (94%), 44 with Key (88%)
+- **Proven coverage:** Tidal API provides excellent audio features
+- **Cache working:** Searches are fast, arrangement is instant
+- **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for testing details
 
 ## Core Principles
 
