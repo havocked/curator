@@ -115,3 +115,74 @@ export async function searchPlaylistsDirect(
     throw new Error(`Direct playlist search failed: ${message.trim()}`);
   }
 }
+
+export async function searchArtistsDirect(
+  options: DirectTidalOptions & { query: string; artistLimit?: number }
+): Promise<Array<{ id: number; name: string; picture: string | null }>> {
+  const helperPath = resolveHelperPath();
+  const args = [
+    helperPath,
+    "--session-path",
+    options.sessionPath,
+    "--search-artists",
+    options.query,
+    "--artist-limit",
+    String(options.artistLimit ?? 5),
+  ];
+
+  try {
+    const { stdout } = await execFileAsync(options.pythonPath, args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const payload = JSON.parse(stdout) as {
+      artists?: Array<{ id: number; name: string; picture?: string | null }>;
+    };
+    const artists = Array.isArray(payload.artists) ? payload.artists : [];
+    return artists.map((artist) => ({
+      id: artist.id,
+      name: artist.name,
+      picture: artist.picture ?? null,
+    }));
+  } catch (error) {
+    const message =
+      error instanceof Error && "stderr" in error
+        ? String((error as { stderr?: string }).stderr ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    throw new Error(`Direct artist search failed: ${message.trim()}`);
+  }
+}
+
+export async function fetchArtistTopTracksDirect(
+  options: DirectTidalOptions & { artistId: number; limit?: number }
+): Promise<FavoritesResponse["favorites"]["tracks"]> {
+  const helperPath = resolveHelperPath();
+  const args = [
+    helperPath,
+    "--session-path",
+    options.sessionPath,
+    "--artist-top-tracks",
+    String(options.artistId),
+    "--limit",
+    String(options.limit ?? 10),
+  ];
+
+  try {
+    const { stdout } = await execFileAsync(options.pythonPath, args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const payload = JSON.parse(stdout) as {
+      tracks?: FavoritesResponse["favorites"]["tracks"];
+    };
+    return Array.isArray(payload.tracks) ? payload.tracks : [];
+  } catch (error) {
+    const message =
+      error instanceof Error && "stderr" in error
+        ? String((error as { stderr?: string }).stderr ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    throw new Error(`Direct artist top tracks failed: ${message.trim()}`);
+  }
+}

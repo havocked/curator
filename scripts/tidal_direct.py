@@ -108,11 +108,51 @@ def main() -> int:
     parser.add_argument(
         "--playlist-limit", type=int, default=5, help="Max playlists to return"
     )
+    parser.add_argument(
+        "--search-artists", help="Search artists by keyword"
+    )
+    parser.add_argument(
+        "--artist-limit", type=int, default=5, help="Max artists to return"
+    )
+    parser.add_argument(
+        "--artist-top-tracks", type=int, help="Fetch top tracks for artist ID"
+    )
     args = parser.parse_args()
 
     try:
         session, tidalapi = load_session(args.session_path)
-        if args.search_playlists:
+        if args.search_artists:
+            search_results = session.search(
+                args.search_artists, models=[tidalapi.Artist], limit=args.artist_limit
+            )
+            artists = []
+            if isinstance(search_results, dict):
+                artists = search_results.get("artists") or []
+            elif hasattr(search_results, "artists"):
+                artists = getattr(search_results, "artists")
+            items = []
+            for artist in artists[: args.artist_limit]:
+                items.append(
+                    {
+                        "id": artist.id,
+                        "name": artist.name,
+                        "picture": safe_image(artist, 320),
+                    }
+                )
+            payload = {
+                "query": args.search_artists,
+                "count": len(items),
+                "artists": items,
+            }
+        elif args.artist_top_tracks is not None:
+            artist = session.artist(args.artist_top_tracks)
+            tracks = artist.get_top_tracks(limit=args.limit)
+            payload = {
+                "artist_id": args.artist_top_tracks,
+                "count": len(tracks),
+                "tracks": [track_to_dict(track) for track in tracks],
+            }
+        elif args.search_playlists:
             search_results = session.search(
                 args.search_playlists, models=[tidalapi.Playlist]
             )

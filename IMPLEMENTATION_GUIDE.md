@@ -55,133 +55,30 @@ The Ed Banger case study revealed:
 - Unblocks label discovery (Phase 3B depends on this)
 - High-value use cases: artist deep-dives, compilations
 
-### Step 1: Add tidal-service Endpoints (2 hours)
+### Step 1: Extend Direct Helper (2 hours)
 
-**File:** `~/clawd/projects/tidal-service/tidal_controller.py`
+Curator stays self-contained. Extend the direct helper to support artist discovery.
 
-Add these methods:
+**File:** `~/clawd/projects/curator/scripts/tidal_direct.py`
 
+Add flags + handlers:
 ```python
-def search_artists(self, query: str, limit: int = 10) -> list[Dict[str, Any]]:
-    """Search for artists by name."""
-    if not self.is_logged_in():
-        print("Not logged in")
-        return []
-    
-    try:
-        results = self.session.search(query, models=[tidalapi.Artist], limit=limit)
-        
-        if not results or not results.get('artists'):
-            return []
-        
-        artists = []
-        for artist in results['artists']:
-            artists.append({
-                "id": artist.id,
-                "name": artist.name,
-                "picture": self._safe_get_image(artist, 320)
-            })
-        
-        return artists
-    except Exception as e:
-        print(f"Artist search error: {e}")
-        return []
-
-def get_artist_top_tracks(self, artist_id: int, limit: int = 10) -> list[Dict[str, Any]]:
-    """Get artist's top tracks sorted by popularity."""
-    if not self.is_logged_in():
-        print("Not logged in")
-        return []
-    
-    try:
-        artist = self.session.artist(artist_id)
-        tracks = artist.get_top_tracks(limit=limit)
-        
-        return [self.get_track_info(t) for t in tracks]
-    except Exception as e:
-        print(f"Error getting artist top tracks: {e}")
-        return []
-
-def get_artist_similar(self, artist_id: int) -> list[Dict[str, Any]]:
-    """Get similar artists."""
-    if not self.is_logged_in():
-        print("Not logged in")
-        return []
-    
-    try:
-        artist = self.session.artist(artist_id)
-        similar = artist.get_similar()
-        
-        return [{
-            "id": a.id,
-            "name": a.name,
-            "picture": self._safe_get_image(a, 320)
-        } for a in similar]
-    except Exception as e:
-        print(f"Error getting similar artists: {e}")
-        return []
+--search-artists "Justice"     # returns artist list
+--artist-top-tracks 57425      # returns top tracks for artist
 ```
 
-**File:** `~/clawd/projects/tidal-service/routes/library.py`
+**File:** `~/clawd/projects/curator/src/services/tidalDirect.ts`
 
-Add these routes:
-
-```python
-@router.get("/artists/search")
-async def search_artists(q: str, limit: int = 10):
-    """Search for artists by name."""
-    if not ctx.tidal.is_logged_in():
-        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
-    
-    if not q or q.strip() == "":
-        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
-    
-    artists = ctx.tidal.search_artists(q, limit=limit)
-    
-    return {
-        "query": q,
-        "count": len(artists),
-        "artists": artists
-    }
-
-
-@router.get("/artist/{artist_id}/top-tracks")
-async def get_artist_top_tracks(artist_id: int, limit: int = 10):
-    """Get artist's top tracks."""
-    if not ctx.tidal.is_logged_in():
-        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
-    
-    tracks = ctx.tidal.get_artist_top_tracks(artist_id, limit=limit)
-    
-    if not tracks:
-        raise HTTPException(status_code=404, detail=f"Artist {artist_id} not found or has no tracks")
-    
-    return {
-        "artist_id": artist_id,
-        "count": len(tracks),
-        "tracks": tracks
-    }
-
-
-@router.get("/artist/{artist_id}/similar")
-async def get_similar_artists(artist_id: int):
-    """Get similar artists."""
-    if not ctx.tidal.is_logged_in():
-        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
-    
-    artists = ctx.tidal.get_artist_similar(artist_id)
-    
-    return {
-        "artist_id": artist_id,
-        "count": len(artists),
-        "artists": artists
-    }
+Add wrapper functions:
+```typescript
+searchArtistsDirect(...)
+fetchArtistTopTracksDirect(...)
 ```
 
 **Test:**
 ```bash
-curl "http://localhost:3001/artists/search?q=Justice&limit=3"
-curl "http://localhost:3001/artist/57425/top-tracks?limit=5"
+python scripts/tidal_direct.py --session-path ~/clawd/projects/tidal-service/tidal_session.json \
+  --search-artists "Justice"
 ```
 
 ### Step 2: Add to Curator (2-3 hours)
@@ -225,10 +122,7 @@ async function discoverByArtists(
     console.log(`  Searching for artist: ${name}`);
     
     // Search for artist
-    const response = await fetch(
-      `${TIDAL_SERVICE_URL}/artists/search?q=${encodeURIComponent(name)}&limit=1`
-    );
-    const data = await response.json();
+    const data = await searchArtistsDirect(name, 1);
     
     if (!data.artists || data.artists.length === 0) {
       console.warn(`  ⚠ Artist not found: ${name}`);
@@ -239,12 +133,8 @@ async function discoverByArtists(
     console.log(`  ✓ Found: ${artist.name} (ID: ${artist.id})`);
     
     // Get top tracks
-    const tracksResponse = await fetch(
-      `${TIDAL_SERVICE_URL}/artist/${artist.id}/top-tracks?limit=${limitPerArtist}`
-    );
-    const tracksData = await tracksResponse.json();
-    
-    allTracks.push(...tracksData.tracks);
+    const tracksData = await fetchArtistTopTracksDirect(artist.id, limitPerArtist);
+    allTracks.push(...tracksData);
   }
   
   console.log(`\nFound ${allTracks.length} total tracks`);
@@ -508,11 +398,10 @@ Expected:
 
 ## Troubleshooting
 
-### tidal-service not running
+### Session / Python path issues
 ```bash
-cd ~/clawd/projects/tidal-service
-source .venv/bin/activate
-python server.py
+export CURATOR_TIDAL_SESSION_PATH=~/clawd/projects/tidal-service/tidal_session.json
+export CURATOR_TIDAL_PYTHON_PATH=~/clawd/projects/tidal-service/.venv/bin/python
 ```
 
 ### MusicBrainz rate limiting
@@ -530,7 +419,7 @@ python server.py
 ## Success Criteria
 
 ### Phase 3A
-- ✅ `/artists/search` and `/artist/{id}/top-tracks` endpoints work
+- ✅ Direct helper can search artists + fetch top tracks
 - ✅ `curator discover --artists` returns tracks with BPM/Key
 - ✅ Pipes correctly to arrange and export
 
