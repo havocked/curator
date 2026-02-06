@@ -8,6 +8,7 @@ export type SyncFavoritesResult = {
   upsertedTracks: number;
   favoriteSignals: number;
   totalTracks: number;
+  audioFeatures: number;
 };
 
 export type FavoritedTrack = {
@@ -16,6 +17,8 @@ export type FavoritedTrack = {
   artist: string | null;
   album: string | null;
   duration: number | null;
+  bpm: number | null;
+  key: string | null;
 };
 
 export function openDatabase(dbPath: string): Database.Database {
@@ -77,7 +80,22 @@ export function syncFavoriteTracks(
     WHERE signal_type = 'favorite' AND signal_source = 'tidal';
   `);
 
+  const insertAudio = db.prepare(`
+    INSERT INTO audio_features (
+      track_id,
+      bpm,
+      key,
+      analyzed_at
+    )
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(track_id) DO UPDATE SET
+      bpm = excluded.bpm,
+      key = excluded.key,
+      analyzed_at = CURRENT_TIMESTAMP;
+  `);
+
   let favoriteSignals = 0;
+  let audioFeatures = 0;
 
   const transaction = db.transaction((items: TidalTrack[]) => {
     clearExisting.run();
@@ -93,6 +111,17 @@ export function syncFavoriteTracks(
       if (row) {
         insertSignal.run(row.id);
         favoriteSignals += 1;
+        if (
+          track.audio_features &&
+          (track.audio_features.bpm != null || track.audio_features.key != null)
+        ) {
+          insertAudio.run(
+            row.id,
+            track.audio_features.bpm ?? null,
+            track.audio_features.key ?? null
+          );
+          audioFeatures += 1;
+        }
       }
     }
   });
@@ -107,6 +136,7 @@ export function syncFavoriteTracks(
     upsertedTracks: tracks.length,
     favoriteSignals,
     totalTracks: totalRow.count,
+    audioFeatures,
   };
 }
 
@@ -120,9 +150,12 @@ export function getFavoritedTracks(
       t.title as title,
       t.artist_name as artist,
       t.album_name as album,
-      t.duration_seconds as duration
+      t.duration_seconds as duration,
+      af.bpm as bpm,
+      af.key as key
     FROM tracks t
     INNER JOIN taste_signals s ON s.track_id = t.id
+    LEFT JOIN audio_features af ON af.track_id = t.id
     WHERE s.signal_type = 'favorite' AND s.signal_source = 'tidal'
     ORDER BY t.artist_name, t.title
   `;

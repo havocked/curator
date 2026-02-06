@@ -51,6 +51,13 @@ export function formatTracksAsJson(tracks: FavoritedTrack[]): string {
       artist: formatLabel(track.artist),
       album: track.album,
       duration: track.duration,
+      audio_features:
+        track.bpm != null || track.key != null
+          ? {
+              bpm: track.bpm ?? null,
+              key: track.key ?? null,
+            }
+          : undefined,
     })),
   };
   return JSON.stringify(output, null, 2);

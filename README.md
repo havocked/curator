@@ -32,10 +32,15 @@ tidal queue playlist.json
 ## Current Status
 
 ### ✅ Working Commands (MVP)
-- `curator sync --source tidal --only favorites` - Syncs favorites from Tidal (with `--dry-run`)
+- `curator sync --source tidal --only favorites` - Syncs favorites from Tidal (default `--via direct`)
 - `curator search --favorited --format json|text|ids` - Query synced favorites
 - `curator filter --familiar|--discovery` - Separate known vs new tracks
+- `curator arrange --arc flat --by tempo|key` - Basic ordering using BPM/Key
 - `curator export --format tidal` - Output track IDs for playback
+
+**Direct sync notes:**
+- Uses `~/clawd/projects/tidal-service/tidal_session.json` by default
+- Override with `CURATOR_TIDAL_SESSION_PATH` or `tidal.session_path` in config
 
 ### 🚧 In Progress
 - `curator arrange` - Currently basic sorting only, needs smart implementation:

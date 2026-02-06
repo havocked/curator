@@ -155,7 +155,9 @@ CREATE TABLE playlist_tracks (
 
 Sync library data from Tidal.
 
-**MVP status:** Only `--only favorites` and `--dry-run` are implemented so far.
+**MVP status:** Only `--only favorites` and `--dry-run` are implemented so far. Default is `--via direct` (no service required).
+
+Direct mode reads the shared session file (default: `~/clawd/projects/tidal-service/tidal_session.json`).
 
 ```bash
 # Full sync (favorites, history, mixes)
@@ -168,6 +170,14 @@ curator sync --source tidal --only mixes
 
 # Show what would be synced (dry run)
 curator sync --source tidal --dry-run
+
+# Use tidal-service instead of direct session
+curator sync --source tidal --via service --service-url http://localhost:3001
+
+# Direct sync with custom session + python
+curator sync --source tidal --via direct \
+  --session-path ~/clawd/projects/tidal-service/tidal_session.json \
+  --python-path ~/clawd/projects/tidal-service/.venv/bin/python
 ```
 
 **Data synced:**
@@ -180,6 +190,7 @@ curator sync --source tidal --dry-run
 ```
 Syncing from Tidal...
   ✓ Favorites: 50 tracks, 8 albums, 30 artists
+  ✓ Audio features: 47 tracks
   ✓ History: 7 mixes (442 unique tracks)
   ✓ Personal mixes: 6 mixes (209 tracks)
   ✓ Recently played: 10 items
@@ -488,6 +499,8 @@ curator history --export > history.json
 # Tidal integration
 tidal:
   service_url: http://localhost:3001
+  session_path: ~/clawd/projects/tidal-service/tidal_session.json
+  python_path: ~/clawd/projects/tidal-service/.venv/bin/python
 
 # Database
 database:

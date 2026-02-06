@@ -1,3 +1,10 @@
+export type TidalAudioFeatures = {
+  bpm?: number | null;
+  key?: string | null;
+  key_scale?: string | null;
+  peak?: number | null;
+};
+
 export type TidalTrack = {
   id: number;
   title: string;
@@ -5,6 +12,7 @@ export type TidalTrack = {
   album: string;
   duration: number;
   album_art?: string | null;
+  audio_features?: TidalAudioFeatures;
 };
 
 export type FavoritesResponse = {
