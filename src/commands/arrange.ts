@@ -4,6 +4,7 @@ import fs from "fs";
 type ArrangeOptions = {
   arc?: string;
   by?: string;
+  maxPerArtist?: string;
 };
 
 type ArrangeArc = "flat" | "gentle_rise";
@@ -98,6 +99,53 @@ function getKeyValue(track: TrackLike): string | null {
     }
   }
   return null;
+}
+
+function getArtistName(track: TrackLike): string | null {
+  // Try common artist field names
+  const candidates = [
+    track.artist_name,
+    track.artistName,
+    track.artist,
+  ];
+  
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim().toLowerCase(); // Normalize for comparison
+    }
+    // Handle artist as object with name property
+    if (typeof candidate === "object" && candidate !== null) {
+      const artistObj = candidate as { name?: unknown };
+      if (typeof artistObj.name === "string" && artistObj.name.trim().length > 0) {
+        return artistObj.name.trim().toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+function enforceArtistLimit(tracks: TrackLike[], maxPerArtist: number): TrackLike[] {
+  const artistCounts = new Map<string, number>();
+  const result: TrackLike[] = [];
+  
+  for (const track of tracks) {
+    const artistName = getArtistName(track);
+    
+    // If we can't determine artist, include the track (don't filter unknowns)
+    if (artistName === null) {
+      result.push(track);
+      continue;
+    }
+    
+    const count = artistCounts.get(artistName) || 0;
+    
+    if (count < maxPerArtist) {
+      result.push(track);
+      artistCounts.set(artistName, count + 1);
+    }
+  }
+  
+  return result;
 }
 
 function splitTracksByBpm(tracks: TrackLike[]): {
@@ -443,7 +491,15 @@ export function arrangeTracks(
 ): { count: number; tracks: TrackLike[] } {
   const arc = normalizeArc(options.arc);
   const by = normalizeBy(options.by);
-  const tracks = extractTracks(payload);
+  let tracks = extractTracks(payload);
+
+  // Apply diversity constraints BEFORE arc arrangement
+  if (options.maxPerArtist) {
+    const limit = parseInt(options.maxPerArtist, 10);
+    if (Number.isFinite(limit) && limit > 0) {
+      tracks = enforceArtistLimit(tracks, limit);
+    }
+  }
 
   let arranged = tracks.slice();
   if (arc === "gentle_rise") {
@@ -501,6 +557,7 @@ export function registerArrangeCommand(program: Command): void {
     .argument("[input]", "Track list JSON file (or stdin)")
     .option("--arc <preset>", "Energy arc preset (flat|gentle_rise)")
     .option("--by <mode>", "Order by field (tempo|key)")
+    .option("--max-per-artist <n>", "Maximum tracks per artist (diversity constraint)")
     .action(async (input: string | undefined, options: ArrangeOptions) => {
       await runArrange(input, options);
     });

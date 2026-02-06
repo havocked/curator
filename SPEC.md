@@ -29,6 +29,7 @@ Curator is a CLI toolkit for music curation. It syncs with Tidal, builds taste p
 - ✅ `curator search --favorited --format json` - Returns tracks WITH audio features
 - ✅ `curator filter --familiar|--discovery` - Separates known vs new tracks
 - ✅ `curator arrange --arc gentle_rise` - REAL intelligent BPM-based curation
+- ✅ `curator arrange --max-per-artist N` - Diversity constraint (Phase 3C)
 - ✅ `curator export --format tidal` - Outputs track IDs for Tidal API
 
 **Proven Results:**
@@ -54,7 +55,7 @@ curator discover --artists "Justice,SebastiAn,Breakbot" --limit-per-artist 5
 curator discover --label "ed banger" --limit 30
 ```
 
-**Phase 3C: Diversity Constraints**
+**Phase 3C: Diversity Constraints** ✅ COMPLETE
 ```bash
 curator arrange --arc gentle_rise --max-per-artist 1
 ```

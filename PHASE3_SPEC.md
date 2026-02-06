@@ -450,9 +450,9 @@ If this works in ~30 seconds and produces a playlist indistinguishable from manu
    - Add curator `--artists` flag (2-3 hours)
    - Test with Justice, Radiohead, etc.
 
-2. **Week 1-2: Phase 3C (Diversity Constraints)**
-   - Add `--max-per-artist` to arrange (2-3 hours)
-   - Test with multi-artist discovery
+2. **Week 1-2: Phase 3C (Diversity Constraints)** ✅ COMPLETE
+   - Add `--max-per-artist` to arrange (2-3 hours) ✅
+   - Test with multi-artist discovery ✅
 
 3. **Week 2: Phase 3B (Label Discovery)**
    - Add MusicBrainz provider (2 hours)
