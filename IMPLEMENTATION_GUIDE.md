@@ -10,13 +10,12 @@
 ### ✅ What Works
 - CLI pipeline: sync → search → filter → export → play
 - Database: Tracks and favorites synced from Tidal
-- Basic arrange infrastructure (CLI, JSON I/O)
+- Audio features stored (BPM/Key) via direct Tidal sync
+- Gentle rise arc + basic tempo/key sorting in arrange
 
 ### ❌ What's Missing
-- **arrange command is theater** - Only sorts arrays, no musical intelligence
-- BPM/Key from Tidal not stored in database yet
-- No energy arc implementation
-- No tempo smoothing logic
+- More arcs: `peak_middle`, `wind_down`, `workout`
+- Key compatibility logic (circle of fifths)
 - No key compatibility logic
 
 ---
@@ -35,7 +34,7 @@
 
 ## Implementation Steps
 
-### Phase 1: Store Audio Features (1-2 hours)
+### Phase 1: Store Audio Features (1-2 hours) ✅ Complete
 
 **File:** `src/commands/sync.ts`
 
@@ -68,11 +67,11 @@ sqlite3 data/curator.db "SELECT COUNT(*) FROM audio_features WHERE bpm IS NOT NU
 
 ---
 
-### Phase 2: Implement Gentle Rise Arc (2-3 hours)
+### Phase 2: Implement Gentle Rise Arc (2-3 hours) ✅ Complete (MVP)
 
 **File:** `src/commands/arrange.ts`
 
-**Current code:** Just sorts by tempo/key ascending (meaningless)
+**Current code:** Gentle rise arc implemented with BPM buckets + smoothing
 
 **What to build:**
 

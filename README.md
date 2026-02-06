@@ -35,7 +35,7 @@ tidal queue playlist.json
 - `curator sync --source tidal --only favorites` - Syncs favorites from Tidal (default `--via direct`)
 - `curator search --favorited --format json|text|ids` - Query synced favorites
 - `curator filter --familiar|--discovery` - Separate known vs new tracks
-- `curator arrange --arc flat --by tempo|key` - Basic ordering using BPM/Key
+- `curator arrange --arc flat|gentle_rise --by tempo|key` - BPM-based ordering + gentle rise arc
 - `curator export --format tidal` - Output track IDs for playback
 
 **Direct sync notes:**

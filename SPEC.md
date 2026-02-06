@@ -321,12 +321,13 @@ curator search --mood evening | \
 
 Order tracks with musical logic using real audio features (BPM, Key from Tidal).
 
-**Current Status:** ⚠️ Infrastructure exists, but only basic sorting implemented
+**Current Status:** ✅ Basic arrangement implemented
 - ✅ CLI interface working
 - ✅ JSON input/output pipeline
-- ❌ Smart arrangement logic - **NEEDS IMPLEMENTATION**
+- ✅ Gentle rise arc (BPM-based) + basic tempo/key sorting
+- ❌ Advanced arcs / key compatibility still missing
 
-**What Needs to Be Built:**
+**What Needs to Be Built (Next):**
 
 ```bash
 # Target usage (once implemented):
