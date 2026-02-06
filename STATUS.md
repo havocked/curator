@@ -1,7 +1,18 @@
 # Curator - Current Status
 
-**Last Updated:** February 6, 2026, 2:00 AM  
+**Last Updated:** February 6, 2026, 12:00 PM  
 **Repository:** https://github.com/havocked/curator
+
+---
+
+## 📋 Recent Updates
+
+**February 6, 2026 (PM):**
+- Revised Phase 3 priorities based on Ed Banger case study
+- Added MusicBrainz integration for label discovery
+- Added ISRC bridge documentation
+- New priority: Artist Discovery → Label Discovery → Diversity Constraints
+- See [LESSONS.md](./LESSONS.md) for the Ed Banger case study
 
 ---
 

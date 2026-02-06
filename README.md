@@ -29,6 +29,21 @@ curator validate playlist.json
 tidal queue playlist.json
 ```
 
+## Real-World Example: Label Showcase
+
+**Request:** "Ed Banger Records playlist, rising energy, one track per artist"
+
+```bash
+# Discover tracks from Ed Banger artists (via MusicBrainz label lookup)
+curator discover --label "ed banger" --limit-per-artist 3 | \
+  curator arrange --arc gentle_rise --max-per-artist 1 | \
+  curator export --format tidal
+```
+
+**Result:** 9 tracks, BPM-sorted (98→138 BPM), one per artist, ready to play.
+
+See [LESSONS.md](./LESSONS.md) for the full case study.
+
 ## Current Status
 
 ### ✅ Phase 1 & 2 Complete: Smart Curation Working!
@@ -58,38 +73,35 @@ curator search --favorited --limit 20 --format json | \
 # Creates intelligently curated playlist with energy arc
 ```
 
-### 🚧 Phase 3: Discovery (In Progress)
+### 🚧 Phase 3: Discovery (Revised Priority)
 
-**Current Limitation:** Caching + advanced sources still missing
-
-**Phase 3 Goal:** Discover NEW tracks from Tidal's catalog based on criteria
-
-**Current Commands (Step 1 & 2):**
+**Phase 3A: Artist Discovery** (HIGHEST PRIORITY)
 ```bash
-curator discover --playlist <playlist-id> --limit 30
+curator discover --artists "Justice,SebastiAn,Breakbot" --limit-per-artist 5
+```
+
+**Phase 3B: Label Discovery** (via MusicBrainz)
+```bash
+curator discover --label "ed banger" --limit 30
+# Uses MusicBrainz API to find label → artists → Tidal tracks
+```
+
+**Phase 3C: Diversity Constraints**
+```bash
+curator arrange --arc gentle_rise --max-per-artist 1
+```
+
+**Phase 3D: Genre/Playlist Discovery** (existing, lower priority)
+```bash
 curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
 ```
-
-**Next Command (Step 3):**
-```bash
-curator discover \
-  --genre "hip-hop" \
-  --tags "boom-bap" \
-  --year 2020-2026 \
-  --limit 50
-# Returns 50 candidate tracks from Tidal with audio features
-```
-
-**Use Case Example:**
-"Build me a boom bap → electro hip hop playlist for a boat party"
-→ Needs discovery to find tracks beyond favorites
 
 **See:** [PHASE3_SPEC.md](./PHASE3_SPEC.md) for the full discovery plan
 
 ### 📊 Data Status
 - **Database:** 50 tracks synced, 47 with BPM (94%), 44 with Key (88%)
 - **Proven coverage:** Tidal API provides excellent audio features
-- **Cache:** Pending (planned for Phase 3 Step 4)
+- **Cache:** Pending (planned for Phase 3)
 - **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for testing details
 
 ## Core Principles
@@ -148,10 +160,35 @@ No random shuffling. Playlists are built from:
 
 **Coverage Report:** See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md)
 
+### From MusicBrainz (Metadata Enrichment) ✅
+**Scalable label and artist discovery**
+
+- **Labels** - Record label → artist relationships (e.g., Ed Banger → Justice, SebastiAn, ...)
+- **Artist relationships** - Recording contracts, similar artists
+- **Genres/tags** - Community-curated genre information
+- **ISRC data** - For cross-platform track matching
+
+**API:** Free, no key required, 1 request/second rate limit
+
+### Cross-Platform Bridge: ISRC
+
+**ISRC (International Standard Recording Code)** is the universal identifier:
+```
+Tidal Track: Justice - D.A.N.C.E (ID: 43421710)
+       ↓
+     ISRC: FR0NT0700420
+       ↓
+MusicBrainz: Same track (MBID: d18a1284-d6a1-42d9-b0c1-...)
+```
+
+This enables:
+- MusicBrainz metadata (labels, genres) + Tidal audio features (BPM, Key)
+- Verification that we found the correct track
+- Future enrichment from other sources
+
 ### Future Enhancements (v2+)
 - **Spotify API** (optional): Fill gaps for the 6% of tracks without Tidal features
 - **Advanced features:** Energy, danceability, valence (via Spotify)
-- **MusicBrainz:** Genre tags, mood labels (enrichment)
 - **Local analysis:** Essentia/librosa for custom audio analysis
 
 ## Installation
@@ -159,7 +196,7 @@ No random shuffling. Playlists are built from:
 ```bash
 # Prerequisites
 node >= 18
-python >= 3.9 (for audio analysis, future)
+python >= 3.9 (for Tidal API access)
 
 # Install
 cd ~/clawd/projects/curator
@@ -176,7 +213,7 @@ See [SPEC.md](./SPEC.md) for detailed command reference.
 | `curator sync` | Sync library from Tidal |
 | `curator profile` | Build/view taste profile |
 | `curator search` | Find tracks matching criteria |
-| `curator discover` | Discover tracks outside favorites |
+| `curator discover` | Discover tracks (artists, labels, genres) |
 | `curator filter` | Filter track lists |
 | `curator arrange` | Order tracks with musical logic |
 | `curator validate` | Check playlist quality |
@@ -204,8 +241,7 @@ curator/
 │   ├── cli.ts              # Entry point
 │   ├── commands/           # Individual commands
 │   │   ├── sync.ts
-│   │   ├── profile.ts
-│   │   ├── search.ts
+│   │   ├── discover.ts
 │   │   ├── filter.ts
 │   │   ├── arrange.ts
 │   │   ├── validate.ts
@@ -214,7 +250,6 @@ curator/
 │   │   ├── tidal.ts
 │   │   └── musicbrainz.ts
 │   ├── core/               # Business logic
-│   │   ├── profile.ts
 │   │   ├── arranger.ts
 │   │   └── validator.ts
 │   └── db/                 # Local storage

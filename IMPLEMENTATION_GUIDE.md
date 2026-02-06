@@ -1,8 +1,8 @@
 # Implementation Guide
 
-**Last Updated:** February 6, 2026, 2:00 AM  
-**Status:** Phase 3 Step 2 COMPLETE ✅  
-**Next:** Phase 3 Step 3 - Enhanced Filtering + Caching
+**Last Updated:** February 6, 2026, 12:00 PM  
+**Status:** Phase 3 Ready for Implementation  
+**Next:** Phase 3A - Artist Discovery
 
 ---
 
@@ -18,367 +18,534 @@
 - ✅ Full pipeline working: sync → search → filter → arrange → export
 - ✅ Tidal playlist creation tested successfully
 
-**Test Results:**
-- Created "Gentle Rise - Curated by Ori" (20 tracks, 56-164 BPM)
-- Energy arc validated: smooth progression from low → peak → maintained high
-- Database: 94% BPM coverage, 88% Key coverage confirmed
-
 **See Complete Documentation:**
 - [PHASE1_COMPLETE.md](./PHASE1_COMPLETE.md) - Full Phase 1 report
 - [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) - Data coverage analysis
 
 ---
 
-## 🚧 Phase 3: Discovery (IN PROGRESS)
+## 🚧 Phase 3: Discovery (Revised Priority)
 
-**Current Limitation:** Discovery caching + advanced sources not implemented yet
+Based on the Ed Banger case study (see [LESSONS.md](./LESSONS.md)), we've revised the Phase 3 priorities:
 
-**Phase 3 Goal:** Discover NEW tracks from Tidal's catalog
+| Phase | Feature | Priority | Time | Status |
+|-------|---------|----------|------|--------|
+| **3A** | Artist Discovery | HIGHEST | 4-5h | Ready |
+| **3B** | Label Discovery (MusicBrainz) | HIGH | 3-4h | Ready |
+| **3C** | Diversity Constraints | HIGH | 2-3h | Ready |
+| 3D | Genre/Playlist Discovery | MEDIUM | 3-4h | Existing |
 
-**What's Missing:**
-- Search-based discovery (`--source search`)
-- Smart caching for repeated queries
-
-**Full Specification:** See [PHASE3_SPEC.md](./PHASE3_SPEC.md)
-
-**Estimated Time:** 7-9 hours
-
----
-
-## Data Available from Tidal (Proven ✅)
-
-**Coverage (tested on 50 favorites):**
-- BPM: 94% (47/50 tracks) ✅
-- Key: 88% (44/50 tracks) ✅
-- Key Scale: 88% (MAJOR/MINOR) ✅
-- Peak: 100% (loudness) ✅
-
-**Access:** Via Python script `scripts/tidal_direct.py`
+**Full Specification:** [PHASE3_SPEC.md](./PHASE3_SPEC.md)
 
 ---
 
-## For Next Agent: Phase 3 Implementation
+## Phase 3A: Artist Discovery (START HERE)
 
-### START HERE: [PHASE3_SPEC.md](./PHASE3_SPEC.md)
+### Goal
 
-The Phase 3 spec contains:
-- Complete command specification
-- Discovery source strategies
-- Database schema updates
-- Step-by-step implementation plan
-- Testing strategy
-- Success criteria
+```bash
+curator discover --artists "Justice,SebastiAn,Breakbot" --limit-per-artist 5
+```
 
-### Previous Phase Notes (Historical - Complete)
+### Why This First?
 
-**File:** `src/commands/sync.ts`
+The Ed Banger case study revealed:
+- Genre/tag discovery fails for label-based requests
+- Artist discovery is simpler to implement
+- Unblocks label discovery (Phase 3B depends on this)
+- High-value use cases: artist deep-dives, compilations
 
-**What to do:**
-1. When syncing tracks, extract audio features from Tidal:
-   ```typescript
-   const track = await tidal.getTrack(id);
-   const audioFeatures = {
-     bpm: track.bpm,
-     key: track.key,
-     key_scale: track.key_scale,
-     peak: track.peak
-   };
-   ```
+### Step 1: Add tidal-service Endpoints (2 hours)
 
-2. Store in `audio_features` table:
-   ```sql
-   INSERT INTO audio_features (track_id, bpm, key, key_scale, peak, source)
-   VALUES (?, ?, ?, ?, ?, 'tidal');
-   ```
+**File:** `~/clawd/projects/tidal-service/tidal_controller.py`
 
-3. Update database schema if needed (see SPEC.md)
+Add these methods:
+
+```python
+def search_artists(self, query: str, limit: int = 10) -> list[Dict[str, Any]]:
+    """Search for artists by name."""
+    if not self.is_logged_in():
+        print("Not logged in")
+        return []
+    
+    try:
+        results = self.session.search(query, models=[tidalapi.Artist], limit=limit)
+        
+        if not results or not results.get('artists'):
+            return []
+        
+        artists = []
+        for artist in results['artists']:
+            artists.append({
+                "id": artist.id,
+                "name": artist.name,
+                "picture": self._safe_get_image(artist, 320)
+            })
+        
+        return artists
+    except Exception as e:
+        print(f"Artist search error: {e}")
+        return []
+
+def get_artist_top_tracks(self, artist_id: int, limit: int = 10) -> list[Dict[str, Any]]:
+    """Get artist's top tracks sorted by popularity."""
+    if not self.is_logged_in():
+        print("Not logged in")
+        return []
+    
+    try:
+        artist = self.session.artist(artist_id)
+        tracks = artist.get_top_tracks(limit=limit)
+        
+        return [self.get_track_info(t) for t in tracks]
+    except Exception as e:
+        print(f"Error getting artist top tracks: {e}")
+        return []
+
+def get_artist_similar(self, artist_id: int) -> list[Dict[str, Any]]:
+    """Get similar artists."""
+    if not self.is_logged_in():
+        print("Not logged in")
+        return []
+    
+    try:
+        artist = self.session.artist(artist_id)
+        similar = artist.get_similar()
+        
+        return [{
+            "id": a.id,
+            "name": a.name,
+            "picture": self._safe_get_image(a, 320)
+        } for a in similar]
+    except Exception as e:
+        print(f"Error getting similar artists: {e}")
+        return []
+```
+
+**File:** `~/clawd/projects/tidal-service/routes/library.py`
+
+Add these routes:
+
+```python
+@router.get("/artists/search")
+async def search_artists(q: str, limit: int = 10):
+    """Search for artists by name."""
+    if not ctx.tidal.is_logged_in():
+        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
+    
+    if not q or q.strip() == "":
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    
+    artists = ctx.tidal.search_artists(q, limit=limit)
+    
+    return {
+        "query": q,
+        "count": len(artists),
+        "artists": artists
+    }
+
+
+@router.get("/artist/{artist_id}/top-tracks")
+async def get_artist_top_tracks(artist_id: int, limit: int = 10):
+    """Get artist's top tracks."""
+    if not ctx.tidal.is_logged_in():
+        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
+    
+    tracks = ctx.tidal.get_artist_top_tracks(artist_id, limit=limit)
+    
+    if not tracks:
+        raise HTTPException(status_code=404, detail=f"Artist {artist_id} not found or has no tracks")
+    
+    return {
+        "artist_id": artist_id,
+        "count": len(tracks),
+        "tracks": tracks
+    }
+
+
+@router.get("/artist/{artist_id}/similar")
+async def get_similar_artists(artist_id: int):
+    """Get similar artists."""
+    if not ctx.tidal.is_logged_in():
+        raise HTTPException(status_code=401, detail="Not logged in to Tidal")
+    
+    artists = ctx.tidal.get_artist_similar(artist_id)
+    
+    return {
+        "artist_id": artist_id,
+        "count": len(artists),
+        "artists": artists
+    }
+```
 
 **Test:**
 ```bash
-curator sync --source tidal --only favorites
-# Check database: audio_features table should have data
-sqlite3 data/curator.db "SELECT COUNT(*) FROM audio_features WHERE bpm IS NOT NULL"
+curl "http://localhost:3001/artists/search?q=Justice&limit=3"
+curl "http://localhost:3001/artist/57425/top-tracks?limit=5"
 ```
 
----
+### Step 2: Add to Curator (2-3 hours)
 
-### Phase 2: Implement Gentle Rise Arc (2-3 hours) ✅ Complete (MVP)
+**File:** `~/clawd/projects/curator/src/commands/discover.ts`
 
-**File:** `src/commands/arrange.ts`
-
-**Current code:** Gentle rise arc implemented with BPM buckets + smoothing
-
-**What to build:**
-
+Add option:
 ```typescript
-function arrangeGentleRise(tracks: Track[]): Track[] {
-  // 1. Group tracks by BPM ranges
-  const low = tracks.filter(t => t.bpm >= 56 && t.bpm <= 90);   // Chill
-  const mid = tracks.filter(t => t.bpm > 90 && t.bpm <= 120);   // Moderate
-  const high = tracks.filter(t => t.bpm > 120 && t.bpm <= 172); // Energetic
-  
-  // 2. Build energy arc structure (12-track playlist example)
-  // Start: 2 low tracks
-  // Build: 3 mid tracks (ascending BPM within bucket)
-  // Peak: 3 high tracks (highest energy)
-  // Descend: 2 mid tracks (descending BPM)
-  // End: 2 low tracks
-  
-  const arc = [
-    ...selectFromBucket(low, 2, 'ascending'),
-    ...selectFromBucket(mid, 3, 'ascending'),
-    ...selectFromBucket(high, 3, 'peak'),
-    ...selectFromBucket(mid, 2, 'descending'),
-    ...selectFromBucket(low, 2, 'descending')
-  ];
-  
-  // 3. Smooth transitions: no >15 BPM jumps
-  return smoothTempoTransitions(arc, maxDelta: 15);
-}
+.option('--artists <names>', 'Comma-separated artist names')
+.option('--limit-per-artist <n>', 'Max tracks per artist', '5')
+```
 
-function smoothTempoTransitions(tracks: Track[], maxDelta: number): Track[] {
-  // If consecutive tracks have >maxDelta BPM difference,
-  // try to find a better track from the pool to bridge the gap
-  // This is the "secret sauce" - prevents jarring jumps
+Add handler:
+```typescript
+if (options.artists) {
+  const artistNames = options.artists.split(',').map(s => s.trim());
+  const limitPerArtist = parseInt(options.limitPerArtist) || 5;
+  
+  console.log(`Discovering tracks from ${artistNames.length} artists...`);
+  
+  const tracks = await discoverByArtists(artistNames, limitPerArtist);
+  
+  if (tracks.length === 0) {
+    console.error('No tracks found');
+    process.exit(1);
+  }
+  
+  return formatOutput(tracks, options.format);
 }
 ```
 
-**Algorithm Details:**
-
-**Energy Buckets:**
-- Low: 56-90 BPM (Billie Eilish - Lost Cause 75, Boards of Canada - Roygbiv 84)
-- Mid: 90-120 BPM (John Moreland 89, George Ezra 94, Soundgarden 106)
-- High: 120-172 BPM (Pouya - 1000 Rounds 150, PNL - Tempête 130)
-
-**Gentle Rise Pattern (20 tracks):**
+Add discovery function:
+```typescript
+async function discoverByArtists(
+  names: string[],
+  limitPerArtist: number
+): Promise<Track[]> {
+  const allTracks: Track[] = [];
+  
+  for (const name of names) {
+    console.log(`  Searching for artist: ${name}`);
+    
+    // Search for artist
+    const response = await fetch(
+      `${TIDAL_SERVICE_URL}/artists/search?q=${encodeURIComponent(name)}&limit=1`
+    );
+    const data = await response.json();
+    
+    if (!data.artists || data.artists.length === 0) {
+      console.warn(`  ⚠ Artist not found: ${name}`);
+      continue;
+    }
+    
+    const artist = data.artists[0];
+    console.log(`  ✓ Found: ${artist.name} (ID: ${artist.id})`);
+    
+    // Get top tracks
+    const tracksResponse = await fetch(
+      `${TIDAL_SERVICE_URL}/artist/${artist.id}/top-tracks?limit=${limitPerArtist}`
+    );
+    const tracksData = await tracksResponse.json();
+    
+    allTracks.push(...tracksData.tracks);
+  }
+  
+  console.log(`\nFound ${allTracks.length} total tracks`);
+  
+  // Fetch audio features (reuse existing logic)
+  return await enrichWithAudioFeatures(allTracks);
+}
 ```
-[Low: 2 tracks]   → Start easy (75-85 BPM)
-[Mid: 4 tracks]   → Build gradually (90-110 BPM)
-[High: 6 tracks]  → Peak energy (120-150 BPM)
-[Mid: 4 tracks]   → Wind down (100-115 BPM)
-[Low: 4 tracks]   → Cool down (75-90 BPM)
-```
-
-**Smoothing Rules:**
-- Within each bucket: sort ascending (start) or descending (end)
-- Between buckets: try to minimize BPM jumps
-- Max jump: 15 BPM (configurable)
-- If jump unavoidable, prefer gradual build over sudden drop
 
 **Test:**
 ```bash
-curator search --favorited --format json | \
-  curator arrange --arc gentle_rise | \
-  curator export --format tidal | \
-  xargs ~/clawd/skills/tidal/scripts/tidal queue
-
-# Play it and FEEL the difference
-# Should start mellow, build energy, peak, wind down
+curator discover --artists "Justice" --limit-per-artist 5 --format json
+curator discover --artists "Justice,Daft Punk,Moderat" --limit-per-artist 3
 ```
 
 ---
 
-### Phase 3: Add More Arcs (1-2 hours each)
+## Phase 3B: Label Discovery via MusicBrainz (3-4 hours)
 
-Once `gentle_rise` works, add:
+### Goal
 
-**peak_middle:**
-```
-[Mid: 3] → [High: 6] → [Mid: 3]
-```
-
-**wind_down:**
-```
-[High: 4] → [Mid: 6] → [Low: 4]
-```
-
-**workout:**
-```
-[Mid: 2] → [High: 8] → [Mid: 2] → [Low: 2]
-```
-
----
-
-### Phase 4: Key Compatibility (Advanced, 2-3 hours)
-
-**Circle of Fifths:**
-```typescript
-const circleOfFifths = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#', 'F'];
-
-function keyDistance(key1: string, key2: string): number {
-  const idx1 = circleOfFifths.indexOf(key1);
-  const idx2 = circleOfFifths.indexOf(key2);
-  if (idx1 === -1 || idx2 === -1) return Infinity;
-  
-  const distance = Math.abs(idx1 - idx2);
-  return Math.min(distance, 12 - distance); // Circular distance
-}
-
-function arrangeByKeyCompatibility(tracks: Track[]): Track[] {
-  // Start with any track
-  // For each next track, prefer keys that are close on circle of fifths
-  // Distance 1 = perfect fifth (very harmonious)
-  // Distance 6 = tritone (very dissonant)
-}
-```
-
-**Good transitions:**
-- C → G (distance 1, perfect fifth)
-- G → D (distance 1)
-- C → F (distance 1 backwards)
-
-**Bad transitions:**
-- C → F# (distance 6, tritone - jarring)
-- C → C# (distance 1 on circle but semitone clash)
-
----
-
-## Testing Strategy
-
-### Unit Tests
-```typescript
-// tests/arrange.test.ts
-describe('arrangeGentleRise', () => {
-  it('should start with low BPM tracks', () => {
-    const tracks = createMockTracks([75, 120, 85, 150]);
-    const arranged = arrangeGentleRise(tracks);
-    expect(arranged[0].bpm).toBeLessThan(90);
-  });
-  
-  it('should peak in the middle', () => {
-    const tracks = createMockTracks([75, 120, 85, 150, 80, 140]);
-    const arranged = arrangeGentleRise(tracks);
-    const midPoint = Math.floor(arranged.length / 2);
-    expect(arranged[midPoint].bpm).toBeGreaterThan(120);
-  });
-  
-  it('should end with low BPM tracks', () => {
-    const tracks = createMockTracks([75, 120, 85, 150]);
-    const arranged = arrangeGentleRise(tracks);
-    expect(arranged[arranged.length - 1].bpm).toBeLessThan(90);
-  });
-});
-```
-
-### Integration Test
 ```bash
-# Generate playlist, play it, observe the energy flow
-curator search --favorited --limit 20 --format json | \
-  curator arrange --arc gentle_rise | \
-  tee /tmp/playlist.json | \
+curator discover --label "ed banger" --limit-per-artist 3
+```
+
+### Implementation
+
+**Step 1: Create MusicBrainz Provider**
+
+**File:** `~/clawd/projects/curator/src/providers/musicbrainz.ts`
+
+```typescript
+const MB_BASE_URL = 'https://musicbrainz.org/ws/2';
+const USER_AGENT = 'Curator/1.0 (curator@example.com)';
+const RATE_LIMIT_MS = 1100; // 1 request per second + buffer
+
+let lastRequestTime = 0;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function mbFetch(path: string): Promise<any> {
+  // Rate limiting
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < RATE_LIMIT_MS) {
+    await sleep(RATE_LIMIT_MS - elapsed);
+  }
+  lastRequestTime = Date.now();
+  
+  const url = `${MB_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`MusicBrainz API error: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+export interface Label {
+  mbid: string;
+  name: string;
+  country?: string;
+  founded?: string;
+}
+
+export async function searchLabel(name: string): Promise<Label | null> {
+  const data = await mbFetch(
+    `/label?query=${encodeURIComponent(name)}&fmt=json&limit=1`
+  );
+  
+  const labels = data.labels || [];
+  if (labels.length === 0) return null;
+  
+  const label = labels[0];
+  return {
+    mbid: label.id,
+    name: label.name,
+    country: label.country,
+    founded: label['life-span']?.begin
+  };
+}
+
+export async function getLabelArtists(labelMbid: string): Promise<string[]> {
+  const data = await mbFetch(
+    `/label/${labelMbid}?fmt=json&inc=artist-rels`
+  );
+  
+  const artists: string[] = [];
+  for (const rel of data.relations || []) {
+    if (rel.type === 'recording contract' && rel.artist) {
+      artists.push(rel.artist.name);
+    }
+  }
+  
+  return artists;
+}
+```
+
+**Step 2: Add to Curator Discover**
+
+Add option:
+```typescript
+.option('--label <name>', 'Record label name (uses MusicBrainz)')
+```
+
+Add handler:
+```typescript
+if (options.label) {
+  console.log(`Searching for label: ${options.label}...`);
+  
+  // Step 1: Search MusicBrainz for label
+  const label = await musicbrainz.searchLabel(options.label);
+  if (!label) {
+    console.error(`Label not found: ${options.label}`);
+    process.exit(1);
+  }
+  
+  console.log(`✓ Found: ${label.name} (${label.country}, ${label.founded})`);
+  
+  // Step 2: Get signed artists
+  console.log('Fetching signed artists...');
+  const artistNames = await musicbrainz.getLabelArtists(label.mbid);
+  console.log(`✓ Found ${artistNames.length} artists`);
+  
+  // Step 3: Discover tracks from each artist (reuse Phase 3A logic)
+  const limitPerArtist = parseInt(options.limitPerArtist) || 3;
+  const tracks = await discoverByArtists(artistNames, limitPerArtist);
+  
+  return formatOutput(tracks, options.format);
+}
+```
+
+**Test:**
+```bash
+curator discover --label "ed banger" --limit-per-artist 2
+curator discover --label "ninja tune" --limit-per-artist 3 --format json
+```
+
+---
+
+## Phase 3C: Diversity Constraints (2-3 hours)
+
+### Goal
+
+```bash
+curator arrange --arc gentle_rise --max-per-artist 1
+```
+
+### Implementation
+
+**File:** `~/clawd/projects/curator/src/commands/arrange.ts`
+
+Add options:
+```typescript
+.option('--max-per-artist <n>', 'Maximum tracks per artist')
+.option('--max-per-album <n>', 'Maximum tracks per album')
+```
+
+Add diversity enforcement:
+```typescript
+function enforceDiversity(tracks: Track[], options: ArrangeOptions): Track[] {
+  let filtered = tracks;
+  
+  if (options.maxPerArtist) {
+    const max = parseInt(options.maxPerArtist);
+    filtered = enforceArtistLimit(filtered, max);
+    console.log(`Applied --max-per-artist ${max}: ${filtered.length} tracks remain`);
+  }
+  
+  if (options.maxPerAlbum) {
+    const max = parseInt(options.maxPerAlbum);
+    filtered = enforceAlbumLimit(filtered, max);
+    console.log(`Applied --max-per-album ${max}: ${filtered.length} tracks remain`);
+  }
+  
+  return filtered;
+}
+
+function enforceArtistLimit(tracks: Track[], max: number): Track[] {
+  const artistCounts = new Map<string, number>();
+  const result: Track[] = [];
+  
+  for (const track of tracks) {
+    const artistKey = track.artist_name.toLowerCase();
+    const count = artistCounts.get(artistKey) || 0;
+    
+    if (count < max) {
+      result.push(track);
+      artistCounts.set(artistKey, count + 1);
+    }
+  }
+  
+  return result;
+}
+
+function enforceAlbumLimit(tracks: Track[], max: number): Track[] {
+  const albumCounts = new Map<string, number>();
+  const result: Track[] = [];
+  
+  for (const track of tracks) {
+    const albumKey = `${track.artist_name}:${track.album_name}`.toLowerCase();
+    const count = albumCounts.get(albumKey) || 0;
+    
+    if (count < max) {
+      result.push(track);
+      albumCounts.set(albumKey, count + 1);
+    }
+  }
+  
+  return result;
+}
+```
+
+In the main arrange function, call diversity before BPM sorting:
+```typescript
+export async function arrange(tracks: Track[], options: ArrangeOptions): Promise<Track[]> {
+  // Step 1: Apply diversity constraints
+  let filtered = enforceDiversity(tracks, options);
+  
+  // Step 2: Apply energy arc (BPM-based sorting)
+  return arrangeByArc(filtered, options.arc);
+}
+```
+
+**Test:**
+```bash
+# Without constraint
+curator discover --artists "Justice" --limit 10 | curator arrange --arc gentle_rise | wc -l
+
+# With constraint
+curator discover --artists "Justice,Daft Punk" --limit-per-artist 5 | \
+  curator arrange --arc gentle_rise --max-per-artist 1 | wc -l
+# Should output exactly 2 tracks
+```
+
+---
+
+## Full Integration Test
+
+The ultimate test is the Ed Banger workflow:
+
+```bash
+# This should work in ~30 seconds and produce a great playlist
+curator discover --label "ed banger" --limit-per-artist 3 | \
+  curator arrange --arc gentle_rise --max-per-artist 1 | \
   curator export --format tidal | \
-  xargs ~/clawd/skills/tidal/scripts/tidal queue
-
-# Check the playlist structure
-cat /tmp/playlist.json | jq '.tracks[] | {title, artist, bpm}'
-
-# Should see:
-# Start: 75-90 BPM
-# Middle: 120-150 BPM (peak)
-# End: 75-90 BPM
+  xargs tidal play-fresh
 ```
+
+Expected:
+- 9+ tracks (one per Ed Banger artist)
+- BPM sorted (slow → fast → slow)
+- Plays immediately via Tidal
 
 ---
 
-## Edge Cases to Handle
+## Troubleshooting
 
-### 1. Not Enough Tracks in a Bucket
-```typescript
-// If there are only 2 high-energy tracks but need 6:
-// - Use what you have
-// - Fill remaining slots with mid-high tracks
-// - Maintain the arc shape as best as possible
+### tidal-service not running
+```bash
+cd ~/clawd/projects/tidal-service
+source .venv/bin/activate
+python server.py
 ```
 
-### 2. Missing BPM Data (6% of tracks)
-```typescript
-// Option A: Exclude tracks without BPM
-// Option B: Place them at the end
-// Option C: Estimate from genre/mood (future)
-```
+### MusicBrainz rate limiting
+- 1 request per second max
+- The provider handles this automatically
+- If you see 503 errors, wait a minute
 
-### 3. Extreme BPM Jumps (unavoidable)
-```typescript
-// If gap >15 BPM and no bridge track available:
-// - Allow the jump but log a warning
-// - Suggest alternative arrangements
-// - Consider fetching Spotify data for better options
-```
-
----
-
-## Code Locations
-
-**Files to modify:**
-- `src/commands/sync.ts` - Add audio features extraction
-- `src/commands/arrange.ts` - Replace sorting with smart logic
-- `src/db/schema.ts` - Ensure audio_features table exists
-- `src/db/index.ts` - Add queries for audio features
-
-**Files to reference:**
-- `/tmp/test_tidal_features.py` - How to get BPM/Key from Tidal
-- `COVERAGE_REPORT.md` - Data coverage analysis
-- `SPEC.md` - Database schema and command specs
-
-**Testing:**
-- `~/clawd/projects/tidal-service/` - For playback integration testing
-- `~/clawd/skills/tidal/scripts/tidal` - CLI for playing results
+### Missing artists in MusicBrainz
+- Not all label-artist relationships are in MusicBrainz
+- Can fall back to release browsing (more requests but more complete)
+- See PHASE3_SPEC.md for alternative approach
 
 ---
 
 ## Success Criteria
 
-### Minimum Viable Implementation
-- ✅ Sync stores BPM/Key in database
-- ✅ `arrange --arc gentle_rise` produces playlists that:
-  - Start at low-mid energy (75-95 BPM)
-  - Build to high energy (120-150 BPM) in middle
-  - Wind down to low energy (75-95 BPM) at end
-  - Have no >15 BPM jumps between consecutive tracks
+### Phase 3A
+- ✅ `/artists/search` and `/artist/{id}/top-tracks` endpoints work
+- ✅ `curator discover --artists` returns tracks with BPM/Key
+- ✅ Pipes correctly to arrange and export
 
-### How to Verify
-1. **Database check:** `audio_features` table populated after sync
-2. **Structure check:** Playlist starts low, peaks middle, ends low
-3. **Smoothness check:** No jarring BPM transitions
-4. **Feel check:** Play the playlist - does it FEEL right?
+### Phase 3B
+- ✅ MusicBrainz provider finds labels and artists
+- ✅ `curator discover --label` chains into artist discovery
+- ✅ Ed Banger workflow produces correct results
 
-The last one is key: if it doesn't feel like a well-curated playlist, iterate!
-
----
-
-## Resources
-
-**Tidal API Access:**
-```python
-# In Python (for testing):
-from tidal_controller import TidalController
-controller = TidalController('path/to/tidal_session.json')
-track = controller.get_track(track_id)
-print(track.bpm, track.key, track.key_scale)
-```
-
-**TypeScript Integration:**
-```typescript
-// Call Python script or port logic to TypeScript
-// tidalapi has TypeScript equivalent: tidal-api-wrapper
-```
-
-**References:**
-- Peter's Philosophy: Close the loop, validate your work
-- Coverage Report: 94% BPM, 88% Key from Tidal
-- Current arrange: Just sorts arrays (lines 143-190 in arrange.ts)
-
----
-
-## Questions for the Next Agent
-
-1. **Database:** Does `audio_features` table exist in current schema? If not, migration needed.
-2. **Tidal integration:** Should we call Python script or port to TypeScript?
-3. **Testing:** Should we write tests first (TDD) or build then test?
-4. **Playlist size:** Should gentle_rise adapt to any playlist length, or assume 12-20 tracks?
+### Phase 3C
+- ✅ `--max-per-artist 1` limits to one track per artist
+- ✅ Applied before BPM sorting
+- ✅ Maintains arc shape
 
 ---
 
 **Good luck! 🎵**
 
-The data is there (94% coverage), the pipeline works, now make it smart!
+The data is there, the patterns are clear, now connect the pipes!
