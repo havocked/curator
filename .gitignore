@@ -50,3 +50,4 @@ coverage/
 # Curator specific
 curator.db
 tidal_session.json
+scripts/__pycache__/

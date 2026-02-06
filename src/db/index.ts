@@ -21,6 +21,12 @@ export type FavoritedTrack = {
   key: string | null;
 };
 
+export type DiscoverResult = {
+  upsertedTracks: number;
+  audioFeatures: number;
+  metadataRows: number;
+};
+
 export function openDatabase(dbPath: string): Database.Database {
   if (dbPath !== ":memory:") {
     const directory = path.dirname(dbPath);
@@ -137,6 +143,112 @@ export function syncFavoriteTracks(
     favoriteSignals,
     totalTracks: totalRow.count,
     audioFeatures,
+  };
+}
+
+export function upsertDiscoveredTracks(
+  db: Database.Database,
+  tracks: TidalTrack[],
+  discoveredVia: string
+): DiscoverResult {
+  const insertTrack = db.prepare(`
+    INSERT INTO tracks (
+      tidal_id,
+      title,
+      artist_name,
+      album_name,
+      duration_seconds,
+      synced_at
+    )
+    VALUES (
+      @tidal_id,
+      @title,
+      @artist_name,
+      @album_name,
+      @duration_seconds,
+      CURRENT_TIMESTAMP
+    )
+    ON CONFLICT(tidal_id) DO UPDATE SET
+      title = excluded.title,
+      artist_name = excluded.artist_name,
+      album_name = excluded.album_name,
+      duration_seconds = excluded.duration_seconds,
+      synced_at = CURRENT_TIMESTAMP;
+  `);
+
+  const selectTrackId = db.prepare(`SELECT id FROM tracks WHERE tidal_id = ?`);
+
+  const insertAudio = db.prepare(`
+    INSERT INTO audio_features (
+      track_id,
+      bpm,
+      key,
+      analyzed_at
+    )
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(track_id) DO UPDATE SET
+      bpm = excluded.bpm,
+      key = excluded.key,
+      analyzed_at = CURRENT_TIMESTAMP;
+  `);
+
+  const insertMetadata = db.prepare(`
+    INSERT INTO track_metadata_extended (
+      track_id,
+      release_year,
+      genres,
+      tags,
+      popularity,
+      artist_followers,
+      discovered_via,
+      discovered_at
+    )
+    VALUES (?, ?, NULL, NULL, NULL, NULL, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(track_id) DO UPDATE SET
+      release_year = excluded.release_year,
+      discovered_via = excluded.discovered_via,
+      discovered_at = CURRENT_TIMESTAMP;
+  `);
+
+  let audioFeatures = 0;
+  let metadataRows = 0;
+
+  const transaction = db.transaction((items: TidalTrack[]) => {
+    for (const track of items) {
+      insertTrack.run({
+        tidal_id: track.id,
+        title: track.title,
+        artist_name: track.artist,
+        album_name: track.album,
+        duration_seconds: track.duration,
+      });
+      const row = selectTrackId.get(track.id) as { id: number } | undefined;
+      if (!row) {
+        continue;
+      }
+      if (
+        track.audio_features &&
+        (track.audio_features.bpm != null || track.audio_features.key != null)
+      ) {
+        insertAudio.run(
+          row.id,
+          track.audio_features.bpm ?? null,
+          track.audio_features.key ?? null
+        );
+        audioFeatures += 1;
+      }
+
+      insertMetadata.run(row.id, track.release_year ?? null, discoveredVia);
+      metadataRows += 1;
+    }
+  });
+
+  transaction(tracks);
+
+  return {
+    upsertedTracks: tracks.length,
+    audioFeatures,
+    metadataRows,
   };
 }
 

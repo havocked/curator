@@ -13,6 +13,7 @@ export type TidalTrack = {
   duration: number;
   album_art?: string | null;
   audio_features?: TidalAudioFeatures;
+  release_year?: number | null;
 };
 
 export type FavoritesResponse = {

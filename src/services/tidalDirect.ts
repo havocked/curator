@@ -43,3 +43,42 @@ export async function fetchFavoritesDirect(
     throw new Error(`Direct Tidal sync failed: ${message.trim()}`);
   }
 }
+
+export async function fetchPlaylistTracksDirect(
+  options: DirectTidalOptions & { playlistId: string }
+): Promise<{ playlist_id: string; count: number; tracks: FavoritesResponse["favorites"]["tracks"] }> {
+  const helperPath = resolveHelperPath();
+  const args = [
+    helperPath,
+    "--session-path",
+    options.sessionPath,
+    "--limit",
+    String(options.limit ?? 50),
+    "--playlist-id",
+    options.playlistId,
+  ];
+
+  try {
+    const { stdout } = await execFileAsync(options.pythonPath, args, {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const payload = JSON.parse(stdout) as {
+      playlist_id?: string;
+      count?: number;
+      tracks?: FavoritesResponse["favorites"]["tracks"];
+    };
+    return {
+      playlist_id: payload.playlist_id ?? options.playlistId,
+      count: Array.isArray(payload.tracks) ? payload.tracks.length : 0,
+      tracks: Array.isArray(payload.tracks) ? payload.tracks : [],
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error && "stderr" in error
+        ? String((error as { stderr?: string }).stderr ?? error.message)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    throw new Error(`Direct playlist fetch failed: ${message.trim()}`);
+  }
+}

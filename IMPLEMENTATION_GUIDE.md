@@ -1,8 +1,8 @@
 # Implementation Guide
 
 **Last Updated:** February 6, 2026, 2:00 AM  
-**Status:** Phase 1 & 2 COMPLETE ✅  
-**Next:** Phase 3 - Discovery
+**Status:** Phase 3 Step 1 COMPLETE ✅  
+**Next:** Phase 3 Step 2 - Genre/Tag Discovery
 
 ---
 
@@ -29,16 +29,15 @@
 
 ---
 
-## 🚧 Phase 3: Discovery (NEXT PRIORITY)
+## 🚧 Phase 3: Discovery (IN PROGRESS)
 
 **Current Limitation:** Can only curate from synced favorites (~50 tracks)
 
 **Phase 3 Goal:** Discover NEW tracks from Tidal's catalog
 
 **What's Missing:**
-- `curator discover` command (find tracks beyond favorites)
-- Genre/tag-based search
-- Playlist-based discovery
+- Genre/tag-based discovery (`curator discover --genre/--tags`)
+- Search-based discovery (`--source search`)
 - Smart caching for repeated queries
 
 **Full Specification:** See [PHASE3_SPEC.md](./PHASE3_SPEC.md)

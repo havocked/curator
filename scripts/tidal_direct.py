@@ -34,6 +34,9 @@ def track_to_dict(track: Any) -> Dict[str, Any]:
     key_scale = getattr(track, "key_scale", None)
     peak = getattr(track, "peak", None)
     bpm = getattr(track, "bpm", None)
+    release_year = None
+    if getattr(track, "album", None) is not None:
+        release_year = getattr(track.album, "year", None)
 
     audio_features: Dict[str, Any] = {}
     if bpm is not None:
@@ -54,6 +57,9 @@ def track_to_dict(track: Any) -> Dict[str, Any]:
         "duration": track.duration,
         "album_art": safe_image(track.album),
     }
+
+    if release_year is not None:
+        payload["release_year"] = release_year
 
     if audio_features:
         payload["audio_features"] = audio_features
@@ -90,29 +96,43 @@ def load_session(session_path: str):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Fetch Tidal favorites directly.")
+    parser = argparse.ArgumentParser(description="Fetch Tidal data directly.")
     parser.add_argument("--session-path", required=True, help="Path to tidal_session.json")
-    parser.add_argument("--limit", type=int, default=50, help="Max favorite tracks")
+    parser.add_argument("--limit", type=int, default=50, help="Max tracks")
+    parser.add_argument(
+        "--playlist-id", help="Fetch tracks from a specific playlist ID"
+    )
     args = parser.parse_args()
 
     try:
         session = load_session(args.session_path)
-        favorites = session.user.favorites
-        tracks = favorites.tracks()
-
-        if args.limit and args.limit > 0:
-            tracks = tracks[: args.limit]
-
-        payload = {
-            "tracks_count": len(tracks),
-            "albums_count": 0,
-            "artists_count": 0,
-            "favorites": {
+        if args.playlist_id:
+            playlist = session.playlist(args.playlist_id)
+            tracks = playlist.tracks()
+            if args.limit and args.limit > 0:
+                tracks = tracks[: args.limit]
+            payload = {
+                "playlist_id": args.playlist_id,
+                "count": len(tracks),
                 "tracks": [track_to_dict(track) for track in tracks],
-                "albums": [],
-                "artists": [],
-            },
-        }
+            }
+        else:
+            favorites = session.user.favorites
+            tracks = favorites.tracks()
+
+            if args.limit and args.limit > 0:
+                tracks = tracks[: args.limit]
+
+            payload = {
+                "tracks_count": len(tracks),
+                "albums_count": 0,
+                "artists_count": 0,
+                "favorites": {
+                    "tracks": [track_to_dict(track) for track in tracks],
+                    "albums": [],
+                    "artists": [],
+                },
+            }
 
         sys.stdout.write(json.dumps(payload))
         return 0

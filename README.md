@@ -36,6 +36,7 @@ tidal queue playlist.json
 **Working Commands:**
 - ✅ `curator sync --source tidal --only favorites` - Syncs favorites WITH audio features (BPM, Key)
 - ✅ `curator search --favorited --format json|text|ids` - Query favorites WITH audio features
+- ✅ `curator discover --playlist <id>` - Discover new tracks from a Tidal playlist
 - ✅ `curator filter --familiar|--discovery` - Separate known vs new tracks
 - ✅ `curator arrange --arc gentle_rise` - **REAL intelligent BPM-based arrangement**
 - ✅ `curator export --format tidal` - Output track IDs for Tidal API
@@ -56,13 +57,18 @@ curator search --favorited --limit 20 --format json | \
 # Creates intelligently curated playlist with energy arc
 ```
 
-### 🚧 Phase 3: Discovery (Next Priority)
+### 🚧 Phase 3: Discovery (In Progress)
 
-**Current Limitation:** Can only curate from your synced favorites (~50 tracks)
+**Current Limitation:** Genre/tag discovery still missing (only playlist IDs supported)
 
 **Phase 3 Goal:** Discover NEW tracks from Tidal's catalog based on criteria
 
-**Needed Command:**
+**Current Command (Step 1):**
+```bash
+curator discover --playlist <playlist-id> --limit 30
+```
+
+**Next Command (Step 2):**
 ```bash
 curator discover \
   --genre "hip-hop" \
@@ -76,12 +82,12 @@ curator discover \
 "Build me a boom bap → electro hip hop playlist for a boat party"
 → Needs discovery to find tracks beyond favorites
 
-**See:** [PHASE3_SPEC.md](./PHASE3_SPEC.md) for detailed implementation guide
+**See:** [PHASE3_SPEC.md](./PHASE3_SPEC.md) for the full discovery plan
 
 ### 📊 Data Status
 - **Database:** 50 tracks synced, 47 with BPM (94%), 44 with Key (88%)
 - **Proven coverage:** Tidal API provides excellent audio features
-- **Cache working:** Searches are fast, arrangement is instant
+- **Cache:** Pending (planned for Phase 3 Step 4)
 - **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for testing details
 
 ## Core Principles
@@ -168,6 +174,7 @@ See [SPEC.md](./SPEC.md) for detailed command reference.
 | `curator sync` | Sync library from Tidal |
 | `curator profile` | Build/view taste profile |
 | `curator search` | Find tracks matching criteria |
+| `curator discover` | Discover tracks outside favorites |
 | `curator filter` | Filter track lists |
 | `curator arrange` | Order tracks with musical logic |
 | `curator validate` | Check playlist quality |
