@@ -16,6 +16,7 @@ type DiscoverOptions = {
   tags?: string;
   artists?: string;
   label?: string;
+  preview?: boolean;
   limitPerArtist?: number;
   limit?: number;
   format?: string;
@@ -163,8 +164,24 @@ function formatLabel(value: string | null | undefined): string {
 function formatTrackList(tracks: TidalTrack[]): string[] {
   return tracks.map((track, index) => {
     const artist = formatLabel(track.artist);
-    const album = track.album ? ` (${track.album})` : "";
-    return `  ${index + 1}. ${artist} - ${track.title}${album}`;
+    const album = track.album ? track.album : "Unknown";
+    const year =
+      track.release_year != null ? String(track.release_year) : "Unknown";
+    const duration =
+      track.duration && track.duration > 0
+        ? `${Math.floor(track.duration / 60)}:${String(
+            track.duration % 60
+          ).padStart(2, "0")}`
+        : "?:??";
+    const bpm =
+      track.audio_features?.bpm != null
+        ? `${Math.round(track.audio_features.bpm)} BPM`
+        : null;
+    const key = track.audio_features?.key ?? null;
+    const features =
+      bpm || key ? ` [${[bpm, key].filter(Boolean).join(", ")}]` : "";
+
+    return `  ${index + 1}. ${track.title} - ${artist} (${album}, ${year}) [${duration}]${features}`;
   });
 }
 
@@ -235,7 +252,7 @@ function normalizeVia(value: string | undefined): "direct" {
 }
 
 export async function runDiscover(options: DiscoverOptions): Promise<void> {
-  const format = normalizeFormat(options.format);
+  const format = normalizeFormat(options.preview ? "text" : options.format);
   const limit = normalizeLimit(options.limit);
   const config = loadConfig();
   normalizeVia(options.via);
@@ -414,6 +431,7 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--tags <tags>", "Comma-separated tags for playlist search")
     .option("--artists <names>", "Comma-separated artist names")
     .option("--label <name>", "Record label name (MusicBrainz)")
+    .option("--preview", "Show text preview (alias for --format text)")
     .option(
       "--limit-per-artist <count>",
       "Max tracks per artist (default: 5)",

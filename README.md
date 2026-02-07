@@ -1,278 +1,89 @@
 # Curator
 
-A CLI-first music curation toolkit. Understands your taste, builds playlists with intention.
-
-## Philosophy
-
-**Tools, not magic.** Curator is a composable toolkit, not a monolithic "make me a playlist" button. Each command does one thing well. Chain them together for complex workflows.
-
-**Close the loop.** Every operation can be validated. If it can't be tested, it shouldn't be automated.
-
-**AI uses tools.** The curator provides the instruments — search, filter, arrange, validate. AI (Ori) orchestrates them intelligently rather than generating playlists out of thin air.
+A CLI-first music curation toolkit for building intelligent playlists from Tidal's catalog.
 
 ## Quick Start
 
 ```bash
-# Sync your Tidal library
-curator sync --source tidal
+cd ~/clawd/projects/curator
+npm install && npm run build
 
-# Build taste profile from listening history
-curator profile --build
-
-# Generate a playlist
-curator generate --mood morning --duration 60
-
-# Validate it
-curator validate playlist.json
-
-# Play via Tidal service
-tidal queue playlist.json
+# Discover → Arrange → Export pipeline
+node dist/cli.js discover --genre "soul" --tags "classic" --limit 20 --format json | \
+  node dist/cli.js arrange --arc gentle_rise | \
+  node dist/cli.js export --format tidal
 ```
-
-## Real-World Example: Label Showcase
-
-**Request:** "Ed Banger Records playlist, rising energy, one track per artist"
-
-```bash
-# Discover tracks from Ed Banger artists (via MusicBrainz label lookup)
-curator discover --label "ed banger" --limit-per-artist 3 | \
-  curator arrange --arc gentle_rise --max-per-artist 1 | \
-  curator export --format tidal
-```
-
-**Result:** 9 tracks, BPM-sorted (98→138 BPM), one per artist, ready to play.
-
-See [LESSONS.md](./LESSONS.md) for the full case study.
 
 ## Current Status
 
-### ✅ Phase 1 & 2 Complete: Smart Curation Working!
-
-**Working Commands:**
-- ✅ `curator sync --source tidal --only favorites` - Syncs favorites WITH audio features (BPM, Key)
-- ✅ `curator search --favorited --format json|text|ids` - Query favorites WITH audio features
-- ✅ `curator discover --playlist <id>` - Discover new tracks from a Tidal playlist
-- ✅ `curator discover --genre <g> --tags <t>` - Discover from playlist search (genre/tag)
-- ✅ `curator discover --artists "Justice,Daft Punk"` - Discover top tracks per artist
-- ✅ `curator filter --familiar|--discovery` - Separate known vs new tracks
-- ✅ `curator arrange --arc gentle_rise` - **REAL intelligent BPM-based arrangement**
-- ✅ `curator export --format tidal` - Output track IDs for Tidal API
-
-**What's Working:**
-- ✅ Audio features stored in database (47/50 tracks with BPM, 44/50 with Key)
-- ✅ Intelligent energy arcs (gentle_rise: start low → peak mid → end low)
-- ✅ Tempo smoothing (max 15 BPM jumps between tracks)
-- ✅ BPM-based bucketing (low ≤90, mid 90-120, high >120)
-- ✅ Dynamic playlist sizing (adapts to any track count)
-- ✅ Created test playlist: "Gentle Rise - Curated by Ori" (20 tracks, 56-164 BPM)
-
-**Example Pipeline:**
-```bash
-curator search --favorited --limit 20 --format json | \
-  curator arrange --arc gentle_rise | \
-  curator export --format tidal
-# Creates intelligently curated playlist with energy arc
-```
-
-### 🚧 Phase 3: Discovery (Revised Priority)
-
-**Phase 3A: Artist Discovery** (HIGHEST PRIORITY)
-```bash
-curator discover --artists "Justice,SebastiAn,Breakbot" --limit-per-artist 5
-```
-
-**Phase 3B: Label Discovery** (via MusicBrainz)
-```bash
-curator discover --label "ed banger" --limit 30
-# Uses MusicBrainz API to find label → artists → Tidal tracks
-```
-
-**Phase 3C: Diversity Constraints**
-```bash
-curator arrange --arc gentle_rise --max-per-artist 1
-```
-
-**Phase 3D: Genre/Playlist Discovery** (existing, lower priority)
-```bash
-curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
-```
-
-**See:** [PHASE3_SPEC.md](./PHASE3_SPEC.md) for the full discovery plan
-
-### 📊 Data Status
-- **Database:** 50 tracks synced, 47 with BPM (94%), 44 with Key (88%)
-- **Proven coverage:** Tidal API provides excellent audio features
-- **Cache:** Pending (planned for Phase 3)
-- **See:** [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) for testing details
-
-## Core Principles
-
-### 1. Separation of Concerns
-
-```
-curator → outputs playlist → player consumes it
-```
-
-Curator doesn't play music. It outputs playlists (JSON, M3U8, Tidal IDs). The existing Tidal service handles playback.
-
-### 2. Composable Commands
-
-```bash
-# Chain operations
-curator search --genre indie-folk --energy 0.4-0.7 | \
-  curator filter --not-recently-played | \
-  curator arrange --arc gentle_rise | \
-  curator validate --strict | \
-  curator export --format tidal
-```
-
-### 3. Validation Loops
-
-```bash
-# Curator can check its own work
-curator validate playlist.json \
-  --check energy-curve \
-  --check tempo-transitions \
-  --check discovery-ratio
-
-# Output:
-# ✅ Energy curve: smooth (0.32 → 0.61 → 0.48)
-# ⚠️  Tempo jump: track 4→5 (142 → 98 BPM)
-# ✅ Discovery: 70% familiar, 30% new
-```
-
-### 4. Data-Driven Curation
-
-No random shuffling. Playlists are built from:
-- **Your taste profile** (from Tidal history)
-- **Musical rules** (key compatibility, tempo flow)
-- **Intentional structure** (energy arcs, discovery balance)
-
-## Data Sources
-
-### From Tidal (Primary) ✅
-**94% coverage** of audio features - better than expected!
-
-- **Favorites** (with timestamps)
-- **Audio features:** BPM (94%), Key (88%) - directly from Tidal API
-- **Track metadata:** Artist, album, duration, ISRC
-- **Listening history:** Personal mixes (My Mix 1-5, Daily Discovery)
-- User playlists, recently played
-
-**Coverage Report:** See [COVERAGE_REPORT.md](./COVERAGE_REPORT.md)
-
-### From MusicBrainz (Metadata Enrichment) ✅
-**Scalable label and artist discovery**
-
-- **Labels** - Record label → artist relationships (e.g., Ed Banger → Justice, SebastiAn, ...)
-- **Artist relationships** - Recording contracts, similar artists
-- **Genres/tags** - Community-curated genre information
-- **ISRC data** - For cross-platform track matching
-
-**API:** Free, no key required, 1 request/second rate limit
-
-### Cross-Platform Bridge: ISRC
-
-**ISRC (International Standard Recording Code)** is the universal identifier:
-```
-Tidal Track: Justice - D.A.N.C.E (ID: 43421710)
-       ↓
-     ISRC: FR0NT0700420
-       ↓
-MusicBrainz: Same track (MBID: d18a1284-d6a1-42d9-b0c1-...)
-```
-
-This enables:
-- MusicBrainz metadata (labels, genres) + Tidal audio features (BPM, Key)
-- Verification that we found the correct track
-- Future enrichment from other sources
-
-### Future Enhancements (v2+)
-- **Spotify API** (optional): Fill gaps for the 6% of tracks without Tidal features
-- **Advanced features:** Energy, danceability, valence (via Spotify)
-- **Local analysis:** Essentia/librosa for custom audio analysis
-
-## Installation
-
-```bash
-# Prerequisites
-node >= 18
-python >= 3.9 (for Tidal API access)
-
-# Install
-cd ~/clawd/projects/curator
-npm install
-npm link  # Makes 'curator' available globally
-```
-
-## Commands
-
-See [SPEC.md](./SPEC.md) for detailed command reference.
+### ✅ Working Features (Phase 1-3)
 
 | Command | Description |
 |---------|-------------|
-| `curator sync` | Sync library from Tidal |
-| `curator profile` | Build/view taste profile |
-| `curator search` | Find tracks matching criteria |
-| `curator discover` | Discover tracks (artists, labels, genres) |
-| `curator filter` | Filter track lists |
-| `curator arrange` | Order tracks with musical logic |
-| `curator validate` | Check playlist quality |
-| `curator export` | Output in various formats |
-| `curator history` | View listening history |
+| `discover --playlist <id>` | Get tracks from a Tidal playlist |
+| `discover --genre <g> --tags <t>` | Search playlists by genre/tags |
+| `discover --artists "A,B,C"` | Get top tracks from artists |
+| `discover --label "name"` | Get tracks from label artists (via MusicBrainz) |
+| `arrange --arc gentle_rise` | BPM-based energy arc arrangement |
+| `arrange --max-per-artist N` | Limit artist repeats (diversity) |
+| `sync --source tidal` | Sync favorites with audio features |
+| `search --favorited` | Query synced favorites |
+| `export --format tidal` | Output track IDs |
 
-## Integration with Tidal Service
+### 🚧 Next Task: Migrate to Official TIDAL SDK
 
-Curator outputs, Tidal plays:
-
-```bash
-# Generate and play in one pipeline
-curator generate --mood evening | tidal queue --stdin
-
-# Or save first, play later
-curator generate --mood focus --duration 90 > focus.json
-tidal queue focus.json
+**Current architecture:**
 ```
+curator (TypeScript) → Python subprocess → tidalapi (community) → TIDAL
+```
+
+**Target architecture:**
+```
+curator (TypeScript) → @tidal-music/api (official) → TIDAL
+```
+
+See [SPEC.md](./SPEC.md) for migration details.
 
 ## Project Structure
 
 ```
 curator/
 ├── src/
-│   ├── cli.ts              # Entry point
-│   ├── commands/           # Individual commands
-│   │   ├── sync.ts
-│   │   ├── discover.ts
-│   │   ├── filter.ts
-│   │   ├── arrange.ts
-│   │   ├── validate.ts
-│   │   └── export.ts
-│   ├── providers/          # Data sources
-│   │   ├── tidal.ts
-│   │   └── musicbrainz.ts
-│   ├── core/               # Business logic
-│   │   ├── arranger.ts
-│   │   └── validator.ts
-│   └── db/                 # Local storage
-│       └── schema.ts
-├── data/
-│   └── curator.db          # SQLite database
-├── package.json
-├── tsconfig.json
-└── README.md
+│   ├── cli.ts                 # Entry point
+│   ├── commands/              # CLI commands
+│   │   ├── discover.ts        # Track discovery
+│   │   ├── arrange.ts         # BPM-based arrangement
+│   │   ├── export.ts          # Output formatting
+│   │   ├── sync.ts            # Tidal sync
+│   │   └── search.ts          # Local search
+│   ├── services/
+│   │   └── tidalDirect.ts     # ⚠️ TO BE REPLACED with SDK
+│   ├── providers/
+│   │   └── musicbrainz.ts     # Label/artist lookup
+│   └── db/                    # SQLite storage
+├── scripts/
+│   └── tidal_direct.py        # ⚠️ TO BE REMOVED (Python helper)
+└── data/
+    └── curator.db             # Local track cache
 ```
 
-## Why CLI?
+## Configuration
 
-From [Peter Steinberger's philosophy](../docs/peter-steinberger-philosophy.md):
+Default paths (can be overridden via env vars):
+- **Database:** `~/clawd/projects/curator/data/curator.db`
+- **Tidal Session:** `~/clawd/projects/tidal-service/tidal_session.json`
+- **Python:** `~/clawd/projects/tidal-service/.venv/bin/python`
 
-> "Models are really good at using Bash... With a CLI, you can chain, filter, script. MCPs pre-export all functions upfront and you can't chain them."
+## Development
 
-CLI enables:
-- **Composability** — pipe commands together
-- **Agent-friendliness** — AI can discover and use tools
-- **Scriptability** — automate workflows
-- **Fast feedback loops** — validate locally, iterate quickly
+```bash
+npm install
+npm run build
+npm test
+
+# Run a command
+node dist/cli.js discover --help
+```
 
 ## License
 

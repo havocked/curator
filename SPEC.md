@@ -2,70 +2,395 @@
 
 ## Overview
 
-Curator is a CLI toolkit for music curation. It syncs with Tidal, builds taste profiles, and generates playlists using musical rules and AI orchestration.
+Curator is a CLI toolkit for music curation. It discovers tracks from Tidal, arranges them using audio features (BPM, key), and outputs playlist-ready track IDs.
 
-**Key constraint:** Curator outputs playlists, doesn't play them. Playback is handled by the existing Tidal service.
-
----
-
-## Current Implementation Status
-
-**Last Updated:** February 6, 2026, 12:00 PM
-
-### ✅ Phase 1 & 2: COMPLETE
-
-**Working Features:**
-- ✅ Audio features sync from Tidal (BPM, Key, Key Scale, Peak)
-- ✅ Smart arrangement with `gentle_rise` energy arc
-- ✅ BPM-based grouping (low ≤90, mid 90-120, high >120)
-- ✅ Tempo smoothing (max 15 BPM jumps)
-- ✅ Dynamic playlist sizing (adapts to track count)
-- ✅ Database storage with 94% BPM coverage, 88% Key coverage
-- ✅ End-to-end pipeline: sync → search → filter → arrange → export
-- ✅ Tidal playlist creation (successfully tested)
-
-**Commands Implemented:**
-- ✅ `curator sync --source tidal --via direct` - Syncs favorites WITH audio features
-- ✅ `curator search --favorited --format json` - Returns tracks WITH audio features
-- ✅ `curator filter --familiar|--discovery` - Separates known vs new tracks
-- ✅ `curator arrange --arc gentle_rise` - REAL intelligent BPM-based curation
-- ✅ `curator arrange --max-per-artist N` - Diversity constraint (Phase 3C)
-- ✅ `curator export --format tidal` - Outputs track IDs for Tidal API
-
-**Proven Results:**
-- Created "Gentle Rise - Curated by Ori" playlist (20 tracks, 56-164 BPM)
-- Energy arc validated: Start low (56-84 BPM) → Peak (132-164 BPM) → Smooth transitions
-- Database: 50 tracks, 47 with BPM (94%), 44 with Key (88%)
-
-**Reports:**
-- [PHASE1_COMPLETE.md](./PHASE1_COMPLETE.md) - Audio features implementation
-- [COVERAGE_REPORT.md](./COVERAGE_REPORT.md) - Tidal API coverage testing
+**Key principle:** Curator outputs playlists, doesn't play them. Playback is handled by tidal-service.
 
 ---
 
-### 🚧 Phase 3: Discovery (Revised Priority)
+## 🚧 NEXT TASK: Migrate to Official TIDAL SDK
 
-**Phase 3A: Artist Discovery** (HIGHEST PRIORITY)
-```bash
-curator discover --artists "Justice,SebastiAn,Breakbot" --limit-per-artist 5
+### Why Migrate?
+
+| Aspect | Current (tidalapi) | Official SDK (@tidal-music/api) |
+|--------|-------------------|----------------------------------|
+| Maintenance | Community-maintained | TIDAL-maintained |
+| Stability | May break on API changes | Official support |
+| Types | None (Python) | Full TypeScript types |
+| Auth | Session file hack | Proper OAuth client credentials |
+| Dependencies | Python subprocess | Pure Node.js |
+
+### Prerequisites
+
+1. **Register app at developer.tidal.com**
+   - Get Client ID and Client Secret
+   - Store in `~/.config/curator/credentials.json`
+
+2. **Install SDK packages:**
+   ```bash
+   npm install @tidal-music/api @tidal-music/auth @tidal-music/common
+   ```
+
+### Migration Plan
+
+#### Step 1: Create SDK Client Module (2 hours)
+
+Create `src/services/tidalSdk.ts`:
+
+```typescript
+import { createAPIClient } from '@tidal-music/api';
+import * as auth from '@tidal-music/auth';
+import fs from 'fs';
+import path from 'path';
+
+let apiClient: ReturnType<typeof createAPIClient> | null = null;
+
+interface Credentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+function loadCredentials(): Credentials {
+  const configPath = path.join(
+    process.env.HOME || '',
+    '.config/curator/credentials.json'
+  );
+  
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Missing credentials file: ${configPath}`);
+  }
+  
+  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+}
+
+export async function initTidalClient(): Promise<void> {
+  const { clientId, clientSecret } = loadCredentials();
+  
+  await auth.init({
+    clientId,
+    clientSecret,
+    credentialsStorageKey: 'curator-tidal-auth',
+    scopes: [],
+  });
+  
+  apiClient = createAPIClient(auth.credentialsProvider);
+}
+
+export function getClient() {
+  if (!apiClient) {
+    throw new Error('Tidal client not initialized. Call initTidalClient() first.');
+  }
+  return apiClient;
+}
 ```
 
-**Phase 3B: Label Discovery** (via MusicBrainz)
-```bash
-curator discover --label "ed banger" --limit 30
+#### Step 2: Implement API Functions (3-4 hours)
+
+Add to `src/services/tidalSdk.ts`:
+
+```typescript
+import type { Track, Artist, Playlist } from './types';
+
+// Country code for API requests
+const COUNTRY_CODE = 'DE'; // or read from config
+
+/**
+ * Search for artists by name
+ */
+export async function searchArtists(
+  query: string,
+  limit: number = 10
+): Promise<Artist[]> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/searchresults/{query}/artists', {
+    params: {
+      path: { query },
+      query: { countryCode: COUNTRY_CODE, limit }
+    }
+  });
+  
+  if (!response.data?.data) return [];
+  
+  return response.data.data.map(artist => ({
+    id: parseInt(artist.id, 10),
+    name: artist.attributes?.name || 'Unknown',
+    picture: artist.attributes?.imageLinks?.[0]?.href || null
+  }));
+}
+
+/**
+ * Get artist's top tracks
+ */
+export async function getArtistTopTracks(
+  artistId: number,
+  limit: number = 10
+): Promise<Track[]> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/artists/{id}/tracks', {
+    params: {
+      path: { id: String(artistId) },
+      query: { countryCode: COUNTRY_CODE, limit }
+    }
+  });
+  
+  if (!response.data?.data) return [];
+  
+  return response.data.data.map(mapTrackFromApi);
+}
+
+/**
+ * Search for playlists
+ */
+export async function searchPlaylists(
+  query: string,
+  limit: number = 10
+): Promise<Playlist[]> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/searchresults/{query}/playlists', {
+    params: {
+      path: { query },
+      query: { countryCode: COUNTRY_CODE, limit }
+    }
+  });
+  
+  if (!response.data?.data) return [];
+  
+  return response.data.data.map(playlist => ({
+    id: playlist.id,
+    title: playlist.attributes?.name || 'Unknown',
+    description: playlist.attributes?.description || ''
+  }));
+}
+
+/**
+ * Get tracks from a playlist
+ */
+export async function getPlaylistTracks(
+  playlistId: string,
+  limit: number = 100
+): Promise<Track[]> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/playlists/{id}/items', {
+    params: {
+      path: { id: playlistId },
+      query: { countryCode: COUNTRY_CODE, limit }
+    }
+  });
+  
+  if (!response.data?.data) return [];
+  
+  return response.data.data
+    .filter(item => item.type === 'tracks')
+    .map(item => mapTrackFromApi(item));
+}
+
+/**
+ * Get track by ID (with audio features)
+ */
+export async function getTrack(trackId: number): Promise<Track | null> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/tracks/{id}', {
+    params: {
+      path: { id: String(trackId) },
+      query: { countryCode: COUNTRY_CODE }
+    }
+  });
+  
+  if (!response.data?.data) return null;
+  
+  return mapTrackFromApi(response.data.data);
+}
+
+/**
+ * Map API response to our Track type
+ */
+function mapTrackFromApi(apiTrack: any): Track {
+  const attrs = apiTrack.attributes || apiTrack;
+  
+  return {
+    id: parseInt(apiTrack.id || attrs.id, 10),
+    title: attrs.title || attrs.name || 'Unknown',
+    artist: attrs.artists?.[0]?.name || attrs.artistName || 'Unknown',
+    album: attrs.album?.title || attrs.albumName || 'Unknown',
+    duration: attrs.duration || 0,
+    release_year: attrs.releaseDate ? 
+      new Date(attrs.releaseDate).getFullYear() : null,
+    audio_features: {
+      bpm: attrs.bpm || null,
+      key: formatKey(attrs.key, attrs.keyScale),
+    }
+  };
+}
+
+function formatKey(key: string | null, scale: string | null): string | null {
+  if (!key) return null;
+  if (!scale) return key;
+  const scaleLower = scale.toLowerCase();
+  if (scaleLower === 'major' || scaleLower === 'minor') {
+    return `${key} ${scaleLower}`;
+  }
+  return key;
+}
 ```
 
-**Phase 3C: Diversity Constraints** ✅ COMPLETE
-```bash
-curator arrange --arc gentle_rise --max-per-artist 1
+#### Step 3: Create Types File (30 min)
+
+Create `src/services/types.ts`:
+
+```typescript
+export interface Track {
+  id: number;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  release_year: number | null;
+  audio_features: {
+    bpm: number | null;
+    key: string | null;
+  };
+}
+
+export interface Artist {
+  id: number;
+  name: string;
+  picture: string | null;
+}
+
+export interface Playlist {
+  id: string;
+  title: string;
+  description: string;
+}
 ```
 
-**Phase 3D: Genre/Playlist Discovery** (existing, lower priority)
-```bash
-curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
+#### Step 4: Update discover.ts (2 hours)
+
+Replace imports and function calls in `src/commands/discover.ts`:
+
+```typescript
+// BEFORE
+import { 
+  searchArtistsDirect, 
+  fetchArtistTopTracksDirect,
+  searchPlaylistsDirect,
+  fetchPlaylistTracksDirect 
+} from '../services/tidalDirect';
+
+// AFTER
+import { 
+  initTidalClient,
+  searchArtists, 
+  getArtistTopTracks,
+  searchPlaylists,
+  getPlaylistTracks 
+} from '../services/tidalSdk';
+
+// At command start, initialize client
+await initTidalClient();
 ```
 
-**Full Specification:** [PHASE3_SPEC.md](./PHASE3_SPEC.md)
+Update function calls:
+- `searchArtistsDirect(...)` → `searchArtists(...)`
+- `fetchArtistTopTracksDirect(...)` → `getArtistTopTracks(...)`
+- `searchPlaylistsDirect(...)` → `searchPlaylists(...)`
+- `fetchPlaylistTracksDirect(...)` → `getPlaylistTracks(...)`
+
+#### Step 5: Update sync.ts (1 hour)
+
+Similar pattern for favorites sync:
+
+```typescript
+// Add to tidalSdk.ts
+export async function getFavorites(limit: number = 100): Promise<Track[]> {
+  const client = getClient();
+  
+  const response = await client.GET('/v2/me/favorites/tracks', {
+    params: {
+      query: { countryCode: COUNTRY_CODE, limit }
+    }
+  });
+  
+  if (!response.data?.data) return [];
+  
+  return response.data.data.map(mapTrackFromApi);
+}
+```
+
+#### Step 6: Remove Python Dependencies (30 min)
+
+1. Delete `scripts/tidal_direct.py`
+2. Delete `src/services/tidalDirect.ts`
+3. Remove Python path config from `src/lib/config.ts`
+4. Update `package.json` - remove any Python-related scripts
+
+#### Step 7: Update Configuration (30 min)
+
+Update `src/lib/config.ts`:
+
+```typescript
+interface TidalConfig {
+  countryCode: string;       // NEW: e.g., "DE", "US"
+  // Remove: session_path, python_path
+}
+```
+
+Create credentials file template:
+```bash
+mkdir -p ~/.config/curator
+cat > ~/.config/curator/credentials.json << 'EOF'
+{
+  "clientId": "YOUR_CLIENT_ID",
+  "clientSecret": "YOUR_CLIENT_SECRET"
+}
+EOF
+```
+
+### Testing the Migration
+
+```bash
+# Build
+npm run build
+
+# Test artist search
+node dist/cli.js discover --artists "Justice" --limit 5 --format json
+
+# Test playlist discovery
+node dist/cli.js discover --genre "electronic" --tags "french" --limit 10 --format json
+
+# Test full pipeline
+node dist/cli.js discover --artists "Daft Punk" --limit 10 --format json | \
+  node dist/cli.js arrange --arc gentle_rise | \
+  node dist/cli.js export --format tidal
+```
+
+### API Reference (Official)
+
+**Base URL:** `https://openapi.tidal.com`
+
+**Key Endpoints:**
+- `GET /v2/artists/{id}` - Artist details
+- `GET /v2/artists/{id}/tracks` - Artist top tracks
+- `GET /v2/albums/{id}` - Album details
+- `GET /v2/tracks/{id}` - Track details (includes BPM, key)
+- `GET /v2/playlists/{id}/items` - Playlist tracks
+- `GET /v2/searchresults/{query}/artists` - Search artists
+- `GET /v2/searchresults/{query}/tracks` - Search tracks
+- `GET /v2/searchresults/{query}/playlists` - Search playlists
+- `GET /v2/me/favorites/tracks` - User favorites (requires user auth)
+
+**Headers:**
+- `Authorization: Bearer <access_token>`
+- `Content-Type: application/vnd.tidal.v1+json`
+
+**Docs:**
+- SDK: https://tidal-music.github.io/tidal-sdk-web
+- API: https://developer.tidal.com/documentation
 
 ---
 
@@ -80,18 +405,10 @@ curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
                │                           │
                ▼                           ▼
 ┌──────────────────────────┐    ┌──────────────────────────┐
-│      MUSICBRAINZ         │    │         TIDAL            │
-│  (labels, artists, ISRC) │    │  (playback, BPM, Key)    │
+│      MUSICBRAINZ         │    │    TIDAL OFFICIAL SDK    │
+│  (labels, artists, ISRC) │    │   (@tidal-music/api)     │
 └──────────────────────────┘    └──────────────────────────┘
-               │                           │
-               └─────────── ISRC ──────────┘
-                    (universal bridge)
 ```
-
-**Data Flow:**
-1. **MusicBrainz** provides: label → artist relationships, ISRCs, genres
-2. **Tidal** provides: audio features (BPM, Key), playback, track IDs
-3. **ISRC** bridges them: same identifier on both platforms
 
 ---
 
@@ -100,355 +417,111 @@ curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
 ### SQLite Schema
 
 ```sql
--- Tracks (synced from Tidal)
+-- Core tracks table
 CREATE TABLE tracks (
     id INTEGER PRIMARY KEY,
     tidal_id INTEGER UNIQUE NOT NULL,
     title TEXT NOT NULL,
-    artist_id INTEGER,
     artist_name TEXT,
-    album_id INTEGER,
     album_name TEXT,
     duration_seconds INTEGER,
-    isrc TEXT,                    -- Universal identifier (bridges MusicBrainz ↔ Tidal)
+    isrc TEXT,
     synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Audio features (from Tidal API)
 CREATE TABLE audio_features (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id),
-    bpm REAL,              -- From Tidal (94% coverage)
-    key TEXT,              -- From Tidal (88% coverage) - e.g., "Eb", "A"
-    key_scale TEXT,        -- From Tidal - "MAJOR" or "MINOR"
-    peak REAL,             -- From Tidal - loudness peak (0.0 - 1.0)
-    source TEXT,           -- 'tidal', 'spotify', 'essentia'
-    
-    -- Extended features (optional, from Spotify/Essentia)
-    energy REAL,           -- 0.0 - 1.0
-    danceability REAL,     -- 0.0 - 1.0
-    valence REAL,          -- 0.0 (sad) - 1.0 (happy)
-    acousticness REAL,     -- 0.0 - 1.0
-    instrumentalness REAL, -- 0.0 - 1.0
-    
+    bpm REAL,
+    key TEXT,
     analyzed_at DATETIME
 );
 
--- Metadata enrichment (from MusicBrainz)
-CREATE TABLE track_metadata (
+-- Extended metadata for discovered tracks
+CREATE TABLE track_metadata_extended (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id),
-    musicbrainz_recording_id TEXT,  -- MBID for the recording
-    musicbrainz_artist_id TEXT,     -- MBID for the artist
-    label_name TEXT,                -- Record label (from MusicBrainz)
-    genres TEXT,                    -- JSON array: ["indie-folk", "acoustic"]
-    moods TEXT,                     -- JSON array: ["calm", "reflective"]
-    tags TEXT,                      -- JSON array of freeform tags
-    enriched_at DATETIME
+    release_year INTEGER,
+    discovered_via TEXT,
+    discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- User taste signals
+-- User signals (favorites, plays)
 CREATE TABLE taste_signals (
     id INTEGER PRIMARY KEY,
     track_id INTEGER REFERENCES tracks(id),
-    signal_type TEXT NOT NULL,  -- 'favorite', 'played', 'skipped', 'liked'
-    signal_source TEXT,         -- 'tidal', 'curator', 'manual'
-    timestamp DATETIME,
-    metadata TEXT               -- JSON for extra context
-);
-
--- Listening history (from Tidal mixes)
-CREATE TABLE listening_history (
-    id INTEGER PRIMARY KEY,
-    track_id INTEGER REFERENCES tracks(id),
-    period TEXT,           -- 'all_time', '2025', '2025-12', '2026-01'
-    source_mix_id TEXT,    -- Tidal mix ID
-    position INTEGER,      -- Position in mix (proxy for play count)
-    synced_at DATETIME
-);
-
--- Generated playlists
-CREATE TABLE playlists (
-    id INTEGER PRIMARY KEY,
-    name TEXT,
-    mood TEXT,
-    duration_minutes INTEGER,
-    track_count INTEGER,
-    created_at DATETIME,
-    metadata TEXT          -- JSON: energy_arc, discovery_ratio, etc.
-);
-
-CREATE TABLE playlist_tracks (
-    playlist_id INTEGER REFERENCES playlists(id),
-    track_id INTEGER REFERENCES tracks(id),
-    position INTEGER,
-    PRIMARY KEY (playlist_id, position)
+    signal_type TEXT NOT NULL,
+    signal_source TEXT,
+    timestamp DATETIME
 );
 ```
 
 ---
 
-## Commands
+## Commands Reference
 
-### `curator sync`
-
-Sync library data from Tidal.
+### discover
 
 ```bash
-# Full sync (favorites, history, mixes)
-curator sync --source tidal
+# From artists
+curator discover --artists "Justice,Daft Punk" --limit-per-artist 5
 
-# Sync specific data
-curator sync --source tidal --only favorites
-curator sync --source tidal --only history
-curator sync --source tidal --only mixes
-
-# Show what would be synced (dry run)
-curator sync --source tidal --dry-run
-
-# Direct sync (default, no tidal-service required)
-curator sync --source tidal --via direct
-```
-
----
-
-### `curator discover`
-
-Discover new tracks from various sources.
-
-#### Artist-Based Discovery (Phase 3A)
-```bash
-# Discover from specific artists
-curator discover --artists "Justice,Daft Punk,Moderat" --limit-per-artist 5
-
-# Single artist deep-dive
-curator discover --artists "Justice" --limit 20
-
-# Combine with format options
-curator discover --artists "Radiohead,Sigur Rós" --limit-per-artist 10 --format json
-```
-
-**How it works:**
-1. Search Tidal for each artist name
-2. Get artist's top tracks (sorted by popularity)
-3. Fetch audio features (BPM, Key) for each track
-4. Output JSON with all tracks
-
-#### Label-Based Discovery (Phase 3B)
-```bash
-# Discover from a record label
+# From label (via MusicBrainz)
 curator discover --label "ed banger" --limit 30
 
-# With per-artist limit
-curator discover --label "ninja tune" --limit-per-artist 3
-```
+# From playlist
+curator discover --playlist <playlist-id> --limit 50
 
-**How it works:**
-1. Search MusicBrainz for label → get MBID
-2. Query label's artist relationships → get signed artists
-3. For each artist: search Tidal → get top tracks
-4. Fetch audio features from Tidal
-5. Output JSON with all tracks
-
-**MusicBrainz API endpoints used:**
-```
-GET /ws/2/label?query=<name>&fmt=json           # Search label
-GET /ws/2/label/<mbid>?fmt=json&inc=artist-rels  # Get signed artists
-```
-
-#### Playlist-Based Discovery
-```bash
-# Discover from a specific Tidal playlist
-curator discover --playlist <playlist-id> --limit 30
-```
-
-#### Genre/Tag-Based Discovery
-```bash
-# Discover from playlist search by genre/tags
-curator discover --genre "hip-hop" --tags "boom-bap" --limit 50
-```
-
-#### Output Formats
-```bash
---format json   # Full metadata (default)
---format text   # Human-readable list
---format ids    # Just Tidal track IDs
-```
-
----
-
-### `curator search`
-
-Find tracks in your synced library.
-
-```bash
-# Search favorites
-curator search --favorited
-curator search --favorited --limit 20 --format json
-
-# Search by audio features
-curator search --bpm 100-120
-curator search --key "C major"
-
-# Search by history
-curator search --played-in 2025-12
-curator search --not-played-days 30
+# From genre/tags
+curator discover --genre "electronic" --tags "french,house" --limit 30
 
 # Output formats
-curator search --favorited --format json
-curator search --favorited --format ids
+--format json   # Full metadata (default)
+--format text   # Human-readable
+--format ids    # Just track IDs
 ```
 
----
-
-### `curator filter`
-
-Filter a list of tracks (stdin or file).
+### arrange
 
 ```bash
-# Filter by familiarity
-curator filter --familiar        # Only tracks you know
-curator filter --discovery       # Only new tracks
+# Energy arcs
+curator arrange --arc gentle_rise   # Low → Peak → Low
+curator arrange --arc flat          # No ordering
 
-# Filter by audio features
-curator filter --bpm 85-110
-curator filter --energy 0.7-1.0
+# Diversity constraints
+curator arrange --max-per-artist 1  # One track per artist
+curator arrange --max-per-artist 3  # Max 3 per artist
 
-# Chain filters
-curator discover --artists "Justice" | \
-  curator filter --bpm 100-130 | \
-  curator filter --discovery
+# Sorting
+curator arrange --by tempo          # Sort by BPM
+curator arrange --by key            # Sort by musical key
 ```
 
----
-
-### `curator arrange`
-
-Order tracks with musical logic using audio features.
+### export
 
 ```bash
-# Energy arc presets
-curator arrange --arc gentle_rise    # Start low → peak → wind down
-curator arrange --arc peak_middle    # Moderate → high → moderate
-curator arrange --arc wind_down      # High → moderate → low
-curator arrange --arc workout        # Build → sustain peak → cool down
+# Output track IDs (space-separated)
+curator export --format tidal
 
-# Diversity constraints (NEW)
-curator arrange --arc gentle_rise --max-per-artist 1   # Showcase mode
-curator arrange --arc gentle_rise --max-per-artist 3   # Allow some repeats
-curator arrange --arc gentle_rise --max-per-album 2    # Album diversity
-
-# Sorting options
-curator arrange --by tempo           # Smooth tempo transitions
-curator arrange --by key             # Circle of fifths compatibility
+# Pipe to tidal-service
+curator export --format tidal | xargs tidal play-fresh
 ```
 
-**Energy Arc: `gentle_rise`**
-```
-[Low: 2 tracks]   → Start easy (75-85 BPM)
-[Mid: 4 tracks]   → Build gradually (90-110 BPM)
-[High: 6 tracks]  → Peak energy (120-150 BPM)
-[Mid: 4 tracks]   → Wind down (100-115 BPM)
-[Low: 4 tracks]   → Cool down (75-90 BPM)
-```
-
-**Diversity Constraints:**
-- `--max-per-artist 1` ensures no artist repeats (showcase mode)
-- Applied before BPM sorting
-- Maintains arc shape with constrained track pool
-
-**Smoothing Rules:**
-- Max 15 BPM jump between consecutive tracks
-- Within each bucket: sort ascending (start) or descending (end)
-
----
-
-### `curator validate`
-
-Check playlist quality.
+### sync
 
 ```bash
-# Full validation
-curator validate playlist.json
+# Sync favorites from Tidal
+curator sync --source tidal --only favorites
 
-# Specific checks
-curator validate playlist.json --check energy-curve
-curator validate playlist.json --check tempo-transitions
-curator validate playlist.json --check artist-diversity
-
-# Strict mode (fails on warnings)
-curator validate playlist.json --strict
+# Dry run (no database writes)
+curator sync --source tidal --dry-run
 ```
 
-**Output:**
-```
-Validating: playlist.json (14 tracks, 58 minutes)
-
-  ✅ Energy curve: smooth rise (0.32 → 0.58 → 0.51)
-  ✅ Tempo transitions: all within ±12 BPM
-  ✅ Artist diversity: no artist appears more than once
-  ⚠️  Key compatibility: track 7→8 (C maj → F# maj, score: 3/10)
-
-Status: PASSED (1 warning)
-```
-
----
-
-### `curator export`
-
-Export playlist in various formats.
+### search
 
 ```bash
-# Export as Tidal track IDs
-curator export playlist.json --format tidal
-
-# Export and create Tidal playlist
-curator export playlist.json --format tidal-playlist --name "Morning Flow"
-
-# Export as M3U8
-curator export playlist.json --format m3u8 --output playlist.m3u8
+# Search local database
+curator search --favorited --limit 20 --format json
 ```
-
----
-
-## Cross-Platform Integration
-
-### ISRC: The Universal Bridge
-
-**ISRC (International Standard Recording Code)** links tracks across platforms:
-
-| Platform | Identifier | Example |
-|----------|------------|---------|
-| Tidal | Track ID | `43421710` |
-| MusicBrainz | Recording MBID | `d18a1284-d6a1-42d9-...` |
-| **ISRC** | Universal | `FR0NT0700420` |
-| Spotify | Track URI | `spotify:track:...` |
-
-**Example: Justice - D.A.N.C.E**
-```
-Tidal:       ID 43421710, ISRC FR0NT0700420, BPM 113, Key A Major
-MusicBrainz: MBID d18a1284-..., same ISRC, Label: Ed Banger Records
-```
-
-### MusicBrainz Integration
-
-**What MusicBrainz provides:**
-- Label → Artist relationships (e.g., "Ed Banger" → Justice, SebastiAn, ...)
-- Artist → Recording relationships
-- ISRC codes for recordings
-- Genre/tag information
-
-**API endpoints:**
-```bash
-# Search for a label
-GET /ws/2/label?query=ed%20banger&fmt=json
-
-# Get label details with signed artists
-GET /ws/2/label/{mbid}?fmt=json&inc=artist-rels
-
-# Lookup by ISRC
-GET /ws/2/isrc/{isrc}?fmt=json&inc=artist-credits
-```
-
-**Rate limiting:** 1 request/second, User-Agent required
 
 ---
 
@@ -457,93 +530,39 @@ GET /ws/2/isrc/{isrc}?fmt=json&inc=artist-credits
 ```yaml
 # ~/.config/curator/config.yaml
 
-# Tidal integration
 tidal:
-  service_url: http://localhost:3001
-  session_path: ~/clawd/projects/tidal-service/tidal_session.json
-  python_path: ~/clawd/projects/tidal-service/.venv/bin/python
+  country_code: DE  # Your Tidal country
 
-# MusicBrainz integration
+database:
+  path: ~/clawd/projects/curator/data/curator.db
+
 musicbrainz:
   user_agent: "Curator/1.0 (your@email.com)"
   rate_limit_ms: 1000
 
-# Database
-database:
-  path: ~/clawd/projects/curator/data/curator.db
-
-# Defaults
 defaults:
-  duration: 60              # minutes
-  familiar_ratio: 0.7       # 70% familiar, 30% discovery
+  limit: 50
   energy_arc: gentle_rise
-  tempo_max_delta: 15       # BPM
-  max_per_artist: null      # No limit by default
-
-# Validation thresholds
-validation:
-  key_compatibility_min: 5  # 1-10 scale
-  tempo_delta_max: 20       # BPM between adjacent tracks
+  tempo_max_delta: 15
 ```
 
----
-
-## Example Workflows
-
-### Label Showcase (Ed Banger)
-```bash
-curator discover --label "ed banger" --limit-per-artist 3 | \
-  curator arrange --arc gentle_rise --max-per-artist 1 | \
-  curator export --format tidal
-```
-
-### Artist Deep-Dive
-```bash
-curator discover --artists "Radiohead" --limit 30 | \
-  curator filter --bpm 80-120 | \
-  curator arrange --arc wind_down | \
-  curator export --format tidal
-```
-
-### Multi-Artist Compilation
-```bash
-curator discover --artists "Justice,Daft Punk,Moderat,Gesaffelstein" \
-  --limit-per-artist 5 | \
-  curator arrange --arc gentle_rise --max-per-artist 2 | \
-  curator validate --check artist-diversity | \
-  curator export --format tidal-playlist --name "French Touch Mix"
-```
-
----
-
-## Development
-
-```bash
-# Setup
-cd ~/clawd/projects/curator
-npm install
-
-# Run in dev mode
-npm run dev -- sync --source tidal
-
-# Build
-npm run build
-
-# Test
-npm test
-
-# Link globally
-npm link
-```
-
-## Dependencies
-
+Credentials file (separate for security):
 ```json
+// ~/.config/curator/credentials.json
 {
-  "commander": "^11.0.0",    // CLI framework
-  "better-sqlite3": "^9.0.0", // Database
-  "chalk": "^5.0.0",         // Terminal colors
-  "ora": "^7.0.0",           // Spinners
-  "yaml": "^2.0.0"           // Config files
+  "clientId": "YOUR_TIDAL_CLIENT_ID",
+  "clientSecret": "YOUR_TIDAL_CLIENT_SECRET"
 }
 ```
+
+---
+
+## Success Criteria for Migration
+
+- [ ] `npm run build` passes without Python dependencies
+- [ ] `curator discover --artists "Justice"` returns tracks with BPM/Key
+- [ ] `curator discover --genre "electronic"` finds playlists and tracks
+- [ ] `curator sync --source tidal` syncs favorites
+- [ ] Full pipeline works: discover → arrange → export
+- [ ] All existing tests pass
+- [ ] Python files removed: `scripts/tidal_direct.py`, `src/services/tidalDirect.ts`
