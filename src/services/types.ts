@@ -20,6 +20,15 @@ export interface Artist {
   picture: string | null;
 }
 
+export interface Album {
+  id: string;
+  title: string;
+  artist: string;
+  releaseDate: string | null;
+  releaseYear: number | null;
+  trackCount: number | null;
+}
+
 export interface Playlist {
   id: string;
   title: string;

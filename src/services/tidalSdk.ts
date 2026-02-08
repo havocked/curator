@@ -4,7 +4,7 @@ import { trueTime } from "@tidal-music/true-time";
 import fs from "fs";
 import path from "path";
 import { expandHome } from "../lib/paths";
-import type { Artist, Track } from "./types";
+import type { Album, Artist, Track } from "./types";
 
 // Suppress noisy "TrueTime is not yet synchronized" from SDK internals
 const _origWarn = console.warn;
@@ -377,6 +377,106 @@ export async function getArtistTopTracks(
 }
 
 // --- Albums ---
+
+export async function getArtistAlbums(
+  artistId: number,
+  limit = 50
+): Promise<Album[]> {
+  const client = getClient();
+  const albumIds: string[] = [];
+  let cursor: string | undefined;
+
+  // Paginate to collect album IDs
+  while (albumIds.length < limit) {
+    const { data } = await client.GET("/artists/{id}/relationships/albums", {
+      params: {
+        path: { id: String(artistId) },
+        query: {
+          countryCode: COUNTRY_CODE,
+          ...(cursor ? { "page[cursor]": cursor } : {}),
+        },
+      },
+    });
+
+    const ids = (data as { data?: ResourceId[] })?.data?.map((r) => r.id) ?? [];
+    if (ids.length === 0) break;
+    albumIds.push(...ids);
+
+    const links = (data as { links?: { next?: string } })?.links;
+    if (links?.next) {
+      const url = new URL(links.next, "https://openapi.tidal.com");
+      cursor = url.searchParams.get("page[cursor]") ?? undefined;
+      if (!cursor) break;
+      await delay(RATE_LIMIT_MS);
+    } else {
+      break;
+    }
+  }
+
+  if (albumIds.length === 0) return [];
+
+  // Fetch album details in batches
+  const albums: Album[] = [];
+  const ALBUM_BATCH_SIZE = 20;
+  for (let i = 0; i < albumIds.length; i += ALBUM_BATCH_SIZE) {
+    const batch = albumIds.slice(i, i + ALBUM_BATCH_SIZE);
+
+    const { data } = await client.GET("/albums", {
+      params: {
+        query: {
+          countryCode: COUNTRY_CODE,
+          "filter[id]": batch,
+          include: ["artists"],
+        },
+      },
+    });
+
+    const includedMap = buildIncludedMap(
+      ((data as { included?: IncludedResource[] })?.included ?? [])
+    );
+
+    for (const album of (data as { data?: AlbumResource[] })?.data ?? []) {
+      const attrs = album.attributes as AlbumAttrs | undefined;
+      const rels = album.relationships as Record<string, { data?: Array<{ id: string; type: string }> }> | undefined;
+
+      // Resolve primary artist
+      const artistRel = rels?.artists?.data?.[0];
+      let artistName = "Unknown";
+      if (artistRel) {
+        const artist = includedMap.get(`artists:${artistRel.id}`);
+        if (artist?.attributes) {
+          artistName = (artist.attributes as { name?: string }).name ?? "Unknown";
+        }
+      }
+
+      const releaseDate = attrs?.releaseDate ?? null;
+      const releaseYear = releaseDate ? new Date(releaseDate).getFullYear() : null;
+
+      albums.push({
+        id: album.id,
+        title: attrs?.title ?? "Unknown",
+        artist: artistName,
+        releaseDate,
+        releaseYear,
+        trackCount: (attrs as { numberOfItems?: number })?.numberOfItems ?? null,
+      });
+    }
+
+    if (i + ALBUM_BATCH_SIZE < albumIds.length) {
+      await delay(RATE_LIMIT_MS);
+    }
+  }
+
+  // Sort by release date descending (newest first)
+  albums.sort((a, b) => {
+    if (!a.releaseDate && !b.releaseDate) return 0;
+    if (!a.releaseDate) return 1;
+    if (!b.releaseDate) return -1;
+    return b.releaseDate.localeCompare(a.releaseDate);
+  });
+
+  return albums.slice(0, limit);
+}
 
 export async function getAlbumTracks(
   albumId: string,

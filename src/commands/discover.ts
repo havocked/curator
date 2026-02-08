@@ -4,6 +4,7 @@ import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import { getLabelArtists, searchLabel } from "../providers/musicbrainz";
 import {
   getAlbumTracks,
+  getArtistAlbums,
   getArtistTopTracks,
   getPlaylistTracks,
   initTidalClient,
@@ -15,6 +16,7 @@ import type { Track } from "../services/types";
 type DiscoverOptions = {
   playlist?: string;
   album?: string;
+  latestAlbum?: string;
   genre?: string;
   tags?: string;
   artists?: string;
@@ -319,6 +321,29 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided artists.");
     }
+  } else if (options.latestAlbum) {
+    await initTidalClient();
+    const artistName = options.latestAlbum.trim();
+    console.error(`[discover] Searching for artist: ${artistName}`);
+    const artists = await searchArtists(artistName, 1);
+    if (artists.length === 0) {
+      throw new Error(`Artist not found: ${artistName}`);
+    }
+    const artist = artists[0]!;
+    console.error(`[discover] Found: ${artist.name} (ID: ${artist.id})`);
+    console.error(`[discover] Fetching discography...`);
+    const albums = await getArtistAlbums(artist.id);
+    if (albums.length === 0) {
+      throw new Error(`No albums found for: ${artist.name}`);
+    }
+    const latest = albums[0]!;
+    albumId = latest.id;
+    console.error(`[discover] Latest album: ${latest.title} (${latest.releaseYear ?? "?"}) — ${latest.trackCount ?? "?"} tracks`);
+    tracks = await getAlbumTracks(albumId, limit);
+    console.error(`[discover] Got ${tracks.length} tracks`);
+    if (tracks.length === 0) {
+      throw new Error(`No tracks found for album: ${latest.title}`);
+    }
   } else if (options.album) {
     await initTidalClient();
     albumId = options.album;
@@ -439,6 +464,7 @@ export function registerDiscoverCommand(program: Command): void {
     .description("Discover new tracks from Tidal catalog")
     .option("--playlist <id>", "Discover tracks from a playlist ID")
     .option("--album <id>", "Discover all tracks from an album")
+    .option("--latest-album <artist>", "Discover tracks from an artist's latest album")
     .option("--genre <genre>", "Discover tracks by genre")
     .option("--tags <tags>", "Comma-separated tags to refine genre search")
     .option("--artists <names>", "Comma-separated artist names")
