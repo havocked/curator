@@ -8,6 +8,7 @@ import {
   initTidalClient,
   searchArtists,
   searchPlaylists,
+  searchTracks,
 } from "../services/tidalSdk";
 import type { TidalTrack } from "../services/tidalService";
 
@@ -205,7 +206,7 @@ export function formatDiscoverAsJson(
       ? "artists"
       : query.playlist
         ? "playlist"
-        : "playlist-search";
+        : "search";
   const output = {
     count: tracks.length,
     source,
@@ -259,7 +260,6 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   normalizeVia(options.via);
 
   let playlistId: string | undefined;
-  let playlistIds: string[] | undefined;
   let artistNames: string[] | undefined;
   let labelName: string | undefined;
   let tracks: TidalTrack[] = [];
@@ -312,30 +312,25 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     }
 
     await initTidalClient();
+
+    // Build search queries from genre + tags
     const queries = buildPlaylistQueries(genre, tags);
-    const playlistIdSet = new Set<string>();
-    const MAX_PLAYLISTS = 6;
-    for (const query of queries) {
-      if (playlistIdSet.size >= MAX_PLAYLISTS) break;
-      const playlists = await searchPlaylists(query, 5);
-      for (const playlist of playlists) {
-        if (playlistIdSet.size >= MAX_PLAYLISTS) break;
-        playlistIdSet.add(playlist.id);
-      }
-    }
-
-    playlistIds = Array.from(playlistIdSet);
-    if (playlistIds.length === 0) {
-      throw new Error("No playlists found for the provided genre/tags.");
-    }
-
     const collected: TidalTrack[] = [];
-    for (const id of playlistIds) {
+
+    // Search tracks directly (much more accurate than playlist search)
+    for (const query of queries) {
       if (collected.length >= limit) break;
-      const playlistTracks = await getPlaylistTracks(id, limit);
-      collected.push(...playlistTracks);
+      console.error(`[discover] Searching tracks: ${query}`);
+      const found = await searchTracks(query, limit);
+      console.error(`[discover] Found ${found.length} tracks`);
+      collected.push(...found);
     }
+
     tracks = dedupeTracks(collected).slice(0, limit);
+
+    if (tracks.length === 0) {
+      throw new Error("No tracks found for the provided genre/tags.");
+    }
   }
 
   const db = openDatabase(config.database.path);
@@ -345,7 +340,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
       ? `playlist:${playlistId}`
       : artistNames
         ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
-        : `playlist-search:${(options.genre ?? "unknown").toLowerCase()}`;
+        : `search:${(options.genre ?? "unknown").toLowerCase()}`;
   try {
     applySchema(db);
     upsertDiscoveredTracks(db, tracks, discoveredVia);
@@ -391,10 +386,6 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   if (tags.length > 0) {
     query.tags = tags;
   }
-  if (playlistIds && playlistIds.length > 0) {
-    query.playlistIds = playlistIds;
-  }
-
   console.log(formatDiscoverAsJson(query, tracks, limit));
 }
 
@@ -403,8 +394,8 @@ export function registerDiscoverCommand(program: Command): void {
     .command("discover")
     .description("Discover new tracks from Tidal catalog")
     .option("--playlist <id>", "Discover tracks from a playlist ID")
-    .option("--genre <genre>", "Discover tracks by genre (playlist search)")
-    .option("--tags <tags>", "Comma-separated tags for playlist search")
+    .option("--genre <genre>", "Discover tracks by genre")
+    .option("--tags <tags>", "Comma-separated tags to refine genre search")
     .option("--artists <names>", "Comma-separated artist names")
     .option("--label <name>", "Record label name (MusicBrainz)")
     .option("--preview", "Show text preview (alias for --format text)")

@@ -322,6 +322,28 @@ export async function searchArtists(
   return candidates.slice(0, limit).map(({ popularity, exactMatch, ...a }) => a);
 }
 
+export async function searchTracks(
+  query: string,
+  limit = 20
+): Promise<Track[]> {
+  const client = getClient();
+
+  const { data: searchData } = await client.GET(
+    "/searchResults/{id}/relationships/tracks",
+    {
+      params: {
+        path: { id: query },
+        query: { countryCode: COUNTRY_CODE, "page[limit]": limit },
+      },
+    }
+  );
+
+  const trackIds = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
+  if (trackIds.length === 0) return [];
+
+  return fetchTracksByIds(client, trackIds.slice(0, limit));
+}
+
 // --- Artist Tracks ---
 
 export async function getArtistTopTracks(
