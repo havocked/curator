@@ -1,12 +1,14 @@
 import { Command } from "commander";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
-import {
-  fetchPlaylistTracksDirect,
-  searchPlaylistsDirect,
-} from "../services/tidalDirect";
 import { getLabelArtists, searchLabel } from "../providers/musicbrainz";
-import { getArtistTopTracks, initTidalClient, searchArtists } from "../services/tidalSdk";
+import {
+  getArtistTopTracks,
+  getPlaylistTracks,
+  initTidalClient,
+  searchArtists,
+  searchPlaylists,
+} from "../services/tidalSdk";
 import type { TidalTrack } from "../services/tidalService";
 
 type DiscoverOptions = {
@@ -255,9 +257,6 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   const config = loadConfig();
   normalizeVia(options.via);
 
-  const sessionPath = options.sessionPath ?? config.tidal.session_path;
-  const pythonPath = options.pythonPath ?? config.tidal.python_path;
-
   let playlistId: string | undefined;
   let playlistIds: string[] | undefined;
   let artistNames: string[] | undefined;
@@ -299,14 +298,9 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     }
     tracks = tracks.slice(0, limit);
   } else if (options.playlist) {
+    await initTidalClient();
     playlistId = options.playlist;
-    const response = await fetchPlaylistTracksDirect({
-      sessionPath,
-      pythonPath,
-      playlistId,
-      limit,
-    });
-    tracks = response.tracks.slice(0, limit);
+    tracks = (await getPlaylistTracks(playlistId, limit)).slice(0, limit);
   } else {
     const tags = parseTags(options.tags);
     const genre = options.genre?.trim();
@@ -316,17 +310,13 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
       );
     }
 
+    await initTidalClient();
     const queries = buildPlaylistQueries(genre, tags);
     const playlistIdSet = new Set<string>();
     const MAX_PLAYLISTS = 6;
     for (const query of queries) {
       if (playlistIdSet.size >= MAX_PLAYLISTS) break;
-      const playlists = await searchPlaylistsDirect({
-        sessionPath,
-        pythonPath,
-        query,
-        playlistLimit: 5,
-      });
+      const playlists = await searchPlaylists(query, 5);
       for (const playlist of playlists) {
         if (playlistIdSet.size >= MAX_PLAYLISTS) break;
         playlistIdSet.add(playlist.id);
@@ -341,13 +331,8 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     const collected: TidalTrack[] = [];
     for (const id of playlistIds) {
       if (collected.length >= limit) break;
-      const response = await fetchPlaylistTracksDirect({
-        sessionPath,
-        pythonPath,
-        playlistId: id,
-        limit,
-      });
-      collected.push(...response.tracks);
+      const playlistTracks = await getPlaylistTracks(id, limit);
+      collected.push(...playlistTracks);
     }
     tracks = dedupeTracks(collected).slice(0, limit);
   }
