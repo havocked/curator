@@ -1,74 +1,55 @@
-# Curator V2 — Where You Are & What's Next
+# Curator V2 — Roadmap
 
 *Last updated: 2026-02-08*
 
 ## Current State
 
-**✅ Completed & Pushed:**
+**Curator is 100% TypeScript + official @tidal-music/api SDK.** Zero Python dependencies.
+
+### ✅ Completed
 - Auth flow: `curator auth login/status/logout` — SDK-native PKCE, encrypted token storage
-- Artist discovery: `discover --artists` uses official Tidal SDK (no Python)
-- Label discovery: `discover --label` uses MusicBrainz + SDK artist search
+- Artist discovery: `discover --artists` — SDK search + top tracks
+- Label discovery: `discover --label` — MusicBrainz + SDK artist search
+- Playlist discovery: `discover --playlist <id>` — SDK `getPlaylistTracks`
+- Genre/tags discovery: `discover --genre/--tags` — SDK `searchPlaylists` + `getPlaylistTracks`
+- Favorites sync: `sync --source tidal` — SDK `getFavoriteTracks` (v2 userCollections API)
 - Arrange: `gentle_rise` BPM arc, flat sort by tempo/key, `--max-per-artist`
 - Filter: `--familiar` / `--discovery` against synced favorites
 - Search: query local SQLite favorites
 - Export: output track IDs for piping to tidal-service
-- Code quality: zero `as any` casts, uses SDK component types properly
-- 25 tests passing, full pipeline works
+- Code quality: zero `as any` casts, uses SDK component types, TrueTime warnings suppressed
+- Python removal: deleted `tidal_direct.py`, `tidalDirect.ts`, cleaned all references
+- 25 tests passing
 
-**⚠️ Still Uses Python (tidalDirect.ts):**
-- `discover --playlist <id>` — fetches playlist tracks via Python subprocess
-- `discover --genre/--tags` — searches playlists via Python subprocess
-- `sync --source tidal` — syncs favorites via Python subprocess
+### Known Limitations
+- Artist/album show "Unknown" on playlist/genre/favorites discovery (relationship not resolved)
+- BPM and key: in SDK type schema but many tracks return null from Tidal
+- `release_year` uses `createdAt` (catalog addition date), not actual album release date
 
-**Known Limitations:**
-- Official API v2 has BPM and key in the type schema, but some tracks return null
-- `release_year` uses `createdAt` (when track was added to Tidal) not actual release date
-- Album name shows "Unknown" (requires extra API call to resolve album relationship)
-
-## Git Log
+## Git Log (Recent)
 ```
+ece0748 feat: remove Python dependency, pure SDK for all Tidal access (Steps 5+6)
+cc3a55b refactor: migrate playlist discovery from Python to SDK (Steps 3+4)
 2125f4b refactor: remove all `as any` casts, use SDK types properly
 8b259f2 feat: SDK-native auth + artist discovery via official Tidal API
 e012e07 Clean up documentation, prepare for SDK migration
 ```
 
-## Next Steps (In Order)
+## Next Steps
 
-### Step 3: Migrate Playlist Search to SDK
-**What:** Replace `searchPlaylistsDirect` (Python) with `searchPlaylists` from `tidalSdk.ts` in the genre/tags discovery path.
-**File:** `src/commands/discover.ts` — the `else` branch (genre/tags path) still imports and calls `searchPlaylistsDirect` and `fetchPlaylistTracksDirect`.
+### Step 7: Resolve Artist & Album on Tracks
+**What:** When fetching tracks, use `include: ["artists", "albums"]` to get real names + release dates.
+**Impact:** Fixes "Unknown" everywhere, gives accurate release_year from album metadata.
 **Test:**
 ```bash
-node dist/cli.js discover --genre "electronic" --tags "french" --limit 10 --format json
+node dist/cli.js discover --genre "electronic" --tags "french" --limit 5 --format json
+# Should show real artist & album names
 ```
 
-### Step 4: Migrate Playlist-by-ID to SDK
-**What:** Replace `fetchPlaylistTracksDirect` with `getPlaylistTracks` from `tidalSdk.ts`.
-**Test:**
-```bash
-node dist/cli.js discover --playlist <playlist-id> --limit 10 --format json
-```
-
-### Step 5: Migrate Sync to SDK
-**What:** Add `getFavorites()` to `tidalSdk.ts`, update `sync.ts` to use it.
-**Test:**
-```bash
-node dist/cli.js sync --source tidal --dry-run
-```
-
-### Step 6: Delete Python 🎉
-**What:** Remove `scripts/tidal_direct.py`, `src/services/tidalDirect.ts`, remove Python config from `src/lib/config.ts`.
-**Test:**
-```bash
-npm run build   # Zero errors
-npm test         # All pass
-grep -r "python\|tidal_direct\|tidalDirect" src/  # Nothing
-```
-
-### Step 7+: New Features
-- `--year-range` filter
+### Step 8+: New Features
+- `--year-range` filter (e.g. `--year-range 1990-2000`)
 - `--popularity-max` filter (hidden gems)
-- `curator playlist create` (write to Tidal)
+- `curator playlist create` (write playlists to Tidal)
 - `--evolution decade` (decade walker engine)
 
 ## Architecture
@@ -78,19 +59,19 @@ curator CLI (TypeScript)
   ├── auth         → @tidal-music/auth (PKCE, encrypted storage)
   ├── discover
   │   ├── --artists/--label  → tidalSdk.ts (official SDK) ✅
-  │   ├── --playlist         → tidalDirect.ts (Python) ⚠️ NEXT
-  │   └── --genre/--tags     → tidalDirect.ts (Python) ⚠️ NEXT
+  │   ├── --playlist         → tidalSdk.ts (official SDK) ✅
+  │   └── --genre/--tags     → tidalSdk.ts (official SDK) ✅
   ├── arrange      → local logic (BPM arcs)
   ├── filter       → local SQLite
   ├── search       → local SQLite
-  ├── sync         → tidalDirect.ts (Python) ⚠️ NEXT
+  ├── sync         → tidalSdk.ts (official SDK) ✅
   └── export       → stdout
 ```
 
 ## Key Files
 - `src/services/tidalSdk.ts` — Official SDK client (typed, no `as any`)
-- `src/services/tidalDirect.ts` — Legacy Python subprocess (TO BE REMOVED)
-- `src/commands/discover.ts` — Main discovery logic (hybrid state)
+- `src/services/tidalService.ts` — HTTP service client (for `--via service` fallback)
+- `src/commands/discover.ts` — Track discovery logic
 - `src/commands/auth.ts` — OAuth login/status/logout
 - `src/services/nodeStorage.ts` — localStorage polyfill for Node.js
 - `~/.config/curator/credentials.json` — Client ID/secret

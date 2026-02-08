@@ -1,9 +1,17 @@
 import { createAPIClient, type components } from "@tidal-music/api";
 import * as auth from "@tidal-music/auth";
+import { trueTime } from "@tidal-music/true-time";
 import fs from "fs";
 import path from "path";
 import { expandHome } from "../lib/paths";
 import type { Artist, Playlist, Track } from "./types";
+
+// Suppress noisy "TrueTime is not yet synchronized" from SDK internals
+const _origWarn = console.warn;
+console.warn = (...args: unknown[]) => {
+  if (typeof args[0] === "string" && args[0].includes("TrueTime")) return;
+  _origWarn.apply(console, args);
+};
 
 // --- SDK Types ---
 
@@ -46,6 +54,7 @@ export async function initTidalClient(): Promise<void> {
   const { clientId, clientSecret } = loadCredentials();
 
   if (!initialized) {
+    await trueTime.synchronize();
     await auth.init({
       clientId,
       clientSecret,
