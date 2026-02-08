@@ -23,6 +23,10 @@ type DiscoverOptions = {
   format?: string;
   via?: string;
   serviceUrl?: string;
+  popularityMin?: number;
+  popularityMax?: number;
+  yearMin?: number;
+  yearMax?: number;
 };
 
 type DiscoverFormat = "json" | "text" | "ids";
@@ -105,6 +109,31 @@ export function dedupeTracks(tracks: Track[]): Track[] {
     unique.push(track);
   }
   return unique;
+}
+
+type TrackFilters = {
+  popularityMin?: number | undefined;
+  popularityMax?: number | undefined;
+  yearMin?: number | undefined;
+  yearMax?: number | undefined;
+};
+
+export function filterTracks(tracks: Track[], filters: TrackFilters): Track[] {
+  return tracks.filter((track) => {
+    if (filters.popularityMin != null) {
+      if (track.popularity == null || track.popularity < filters.popularityMin) return false;
+    }
+    if (filters.popularityMax != null) {
+      if (track.popularity == null || track.popularity > filters.popularityMax) return false;
+    }
+    if (filters.yearMin != null) {
+      if (track.release_year == null || track.release_year < filters.yearMin) return false;
+    }
+    if (filters.yearMax != null) {
+      if (track.release_year == null || track.release_year > filters.yearMax) return false;
+    }
+    return true;
+  });
 }
 
 function wait(ms: number): Promise<void> {
@@ -271,7 +300,6 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     if (tracks.length === 0) {
       throw new Error("No tracks found for label artists.");
     }
-    tracks = tracks.slice(0, limit);
   } else if (options.artists) {
     await initTidalClient();
     artistNames = parseArtists(options.artists);
@@ -284,11 +312,10 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided artists.");
     }
-    tracks = tracks.slice(0, limit);
   } else if (options.playlist) {
     await initTidalClient();
     playlistId = options.playlist;
-    tracks = (await getPlaylistTracks(playlistId, limit)).slice(0, limit);
+    tracks = await getPlaylistTracks(playlistId, limit);
   } else {
     const tags = parseTags(options.tags);
     const genre = options.genre?.trim();
@@ -304,12 +331,28 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     console.error(`[discover] Searching tracks: ${query}`);
     const found = await searchTracks(query, limit);
     console.error(`[discover] Found ${found.length} tracks`);
-    tracks = found.slice(0, limit);
+    tracks = found;
 
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided genre/tags.");
     }
   }
+
+  // Apply filters
+  const filters: TrackFilters = {
+    popularityMin: options.popularityMin,
+    popularityMax: options.popularityMax,
+    yearMin: options.yearMin,
+    yearMax: options.yearMax,
+  };
+  const hasFilters = Object.values(filters).some((v) => v != null);
+  if (hasFilters) {
+    const beforeCount = tracks.length;
+    tracks = filterTracks(tracks, filters);
+    console.error(`[discover] Filtered ${beforeCount} → ${tracks.length} tracks`);
+  }
+
+  tracks = tracks.slice(0, limit);
 
   const db = openDatabase(config.database.path);
   const discoveredVia = labelName
@@ -384,6 +427,10 @@ export function registerDiscoverCommand(program: Command): void {
     )
     .option("--limit <count>", "Limit results (default: 50)", (value) => Number.parseInt(value, 10))
     .option("--format <format>", "Output format (json|text|ids)", "json")
+    .option("--popularity-min <value>", "Min popularity (0.0-1.0)", parseFloat)
+    .option("--popularity-max <value>", "Max popularity (0.0-1.0)", parseFloat)
+    .option("--year-min <year>", "Min release year", (v) => Number.parseInt(v, 10))
+    .option("--year-max <year>", "Max release year", (v) => Number.parseInt(v, 10))
     .option("--via <mode>", "Discovery mode (direct)", "direct")
     .action(async (options: DiscoverOptions) => {
       await runDiscover(options);
