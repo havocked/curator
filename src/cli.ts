@@ -10,6 +10,7 @@ import { registerAuthCommand } from "./commands/auth";
 import { registerDiscoverCommand } from "./commands/discover";
 import { registerExportCommand } from "./commands/export";
 import { registerFilterCommand } from "./commands/filter";
+import { registerPlaylistCommand } from "./commands/playlist";
 import { registerSearchCommand } from "./commands/search";
 import { registerSyncCommand } from "./commands/sync";
 
@@ -26,6 +27,7 @@ registerExportCommand(program);
 registerFilterCommand(program);
 registerArrangeCommand(program);
 registerDiscoverCommand(program);
+registerPlaylistCommand(program);
 registerAuthCommand(program);
 
 program.parseAsync(process.argv).catch((error) => {

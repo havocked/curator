@@ -9,13 +9,15 @@ import { loadCredentials } from "../services/tidalSdk";
 const REDIRECT_URI = "http://localhost:8080/callback";
 const CREDENTIALS_STORAGE_KEY = "curator-tidal-auth";
 
+const AUTH_SCOPES = ["user.read", "collection.read", "playlists.read", "playlists.write"];
+
 async function initAuth(): Promise<void> {
   const { clientId, clientSecret } = loadCredentials();
   await auth.init({
     clientId,
     clientSecret,
     credentialsStorageKey: CREDENTIALS_STORAGE_KEY,
-    scopes: ["user.read", "collection.read"],
+    scopes: AUTH_SCOPES,
   });
 }
 
@@ -75,10 +77,11 @@ async function loginWithBrowser(): Promise<void> {
     });
 
     // Timeout after 2 minutes
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       server.close();
       reject(new Error("Login timed out after 2 minutes"));
     }, 120_000);
+    timeout.unref();
   });
 }
 

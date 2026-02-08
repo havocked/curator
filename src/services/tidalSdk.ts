@@ -60,7 +60,7 @@ export async function initTidalClient(): Promise<void> {
       clientId,
       clientSecret,
       credentialsStorageKey: CREDENTIALS_STORAGE_KEY,
-      scopes: ["user.read", "collection.read"],
+      scopes: ["user.read", "collection.read", "playlists.read", "playlists.write"],
     });
     initialized = true;
   }
@@ -83,6 +83,13 @@ export function getClient(): ApiClient {
     throw new Error("Tidal client not initialized. Call initTidalClient() first.");
   }
   return apiClient;
+}
+
+export function getUserId(): string {
+  if (!userId) {
+    throw new Error("No user session. Call initTidalClient() first.");
+  }
+  return userId;
 }
 
 // --- Helpers ---
@@ -472,4 +479,87 @@ export async function getTrack(trackId: number): Promise<Track | null> {
   const client = getClient();
   const tracks = await fetchTracksByIds(client, [String(trackId)]);
   return tracks[0] ?? null;
+}
+
+// --- Playlist Management ---
+
+const PLAYLIST_ITEMS_BATCH = 20; // API max per request
+
+export type CreatePlaylistOptions = {
+  name: string;
+  description?: string | undefined;
+  isPublic?: boolean | undefined;
+};
+
+export async function createPlaylist(
+  options: CreatePlaylistOptions
+): Promise<{ id: string; name: string }> {
+  const client = getClient();
+
+  const resp = await client.POST("/playlists", {
+    body: {
+      data: {
+        type: "playlists",
+        attributes: {
+          name: options.name,
+          description: options.description,
+          accessType: options.isPublic ? "PUBLIC" : "UNLISTED",
+        },
+      },
+    } as never,
+    params: { query: { countryCode: COUNTRY_CODE } },
+  });
+
+  if (resp.error) {
+    throw new Error(`Failed to create playlist: ${JSON.stringify(resp.error)}`);
+  }
+
+  const data = (resp.data as { data?: { id?: string; attributes?: { name?: string } } })?.data;
+  const id = data?.id;
+  const name = data?.attributes?.name ?? options.name;
+
+  if (!id) {
+    throw new Error("Playlist created but no ID returned");
+  }
+
+  return { id, name };
+}
+
+export async function addTracksToPlaylist(
+  playlistId: string,
+  trackIds: string[]
+): Promise<number> {
+  const client = getClient();
+  let added = 0;
+
+  for (let i = 0; i < trackIds.length; i += PLAYLIST_ITEMS_BATCH) {
+    const batch = trackIds.slice(i, i + PLAYLIST_ITEMS_BATCH);
+
+    const resp = await client.POST("/playlists/{id}/relationships/items", {
+      params: {
+        path: { id: playlistId },
+        query: { countryCode: COUNTRY_CODE },
+      },
+      body: {
+        data: batch.map((tid) => ({
+          id: tid,
+          type: "tracks" as const,
+        })),
+      } as never,
+    });
+
+    if (resp.error) {
+      throw new Error(
+        `Failed to add tracks (batch ${Math.floor(i / PLAYLIST_ITEMS_BATCH) + 1}): ${JSON.stringify(resp.error)}`
+      );
+    }
+
+    added += batch.length;
+
+    if (i + PLAYLIST_ITEMS_BATCH < trackIds.length) {
+      await delay(RATE_LIMIT_MS);
+    }
+  }
+
+  return added;
 }
