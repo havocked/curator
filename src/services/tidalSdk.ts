@@ -21,6 +21,7 @@ interface Credentials {
 // --- State ---
 
 let apiClient: ApiClient | null = null;
+let userId: string | null = null;
 let initialized = false;
 
 const CREDENTIALS_STORAGE_KEY = "curator-tidal-auth";
@@ -49,7 +50,7 @@ export async function initTidalClient(): Promise<void> {
       clientId,
       clientSecret,
       credentialsStorageKey: CREDENTIALS_STORAGE_KEY,
-      scopes: [],
+      scopes: ["user.read", "collection.read"],
     });
     initialized = true;
   }
@@ -63,6 +64,7 @@ export async function initTidalClient(): Promise<void> {
     throw new Error("No user session. Run: curator auth login");
   }
 
+  userId = String(creds.userId);
   apiClient = createAPIClient(auth.credentialsProvider);
 }
 
@@ -317,6 +319,83 @@ export async function getPlaylistTracks(
       const track = await fetchTrackById(client, id);
       if (track) tracks.push(track);
     }
+  }
+  return tracks;
+}
+
+// --- User Favorites ---
+
+export async function getFavoriteTracks(limit = 500): Promise<Track[]> {
+  const client = getClient();
+  if (!userId) {
+    throw new Error("No user ID. Call initTidalClient() first.");
+  }
+
+  const allTrackIds: string[] = [];
+  let cursor: string | undefined;
+
+  // Paginate through user collection to gather all track IDs
+  while (allTrackIds.length < limit) {
+    const queryParams: Record<string, unknown> = {
+      locale: "en-US",
+      countryCode: COUNTRY_CODE,
+      include: ["tracks"],
+    };
+    if (cursor) {
+      queryParams["page[cursor]"] = cursor;
+    }
+
+    const { data, error } = await client.GET(
+      "/userCollections/{id}/relationships/tracks",
+      {
+        params: {
+          path: { id: userId },
+          query: queryParams as {
+            locale: string;
+            countryCode?: string;
+            include?: string[];
+            "page[cursor]"?: string;
+          },
+        },
+      }
+    );
+
+    if (error) {
+      const detail =
+        "errors" in error
+          ? (error.errors as Array<{ detail?: string }>)[0]?.detail
+          : String(error);
+      throw new Error(`Failed to fetch favorites: ${detail}`);
+    }
+
+    const ids = data?.data?.map((r: { id: string }) => r.id) ?? [];
+    if (ids.length === 0) break;
+    allTrackIds.push(...ids);
+
+    // Check for next page via links.next
+    const nextLink = data?.links?.next;
+    if (!nextLink) break;
+
+    const cursorMatch = nextLink.match(
+      /page%5Bcursor%5D=([^&]+)|page\[cursor\]=([^&]+)/
+    );
+    cursor = cursorMatch
+      ? decodeURIComponent(cursorMatch[1] ?? cursorMatch[2] ?? "")
+      : undefined;
+    if (!cursor) break;
+
+    await delay(RATE_LIMIT_MS);
+  }
+
+  const trackIds = allTrackIds.slice(0, limit);
+  if (trackIds.length === 0) return [];
+
+  // Use included track data when available, fetch individually otherwise
+  const tracks: Track[] = [];
+  for (const id of trackIds) {
+    await delay(RATE_LIMIT_MS);
+    const track = await fetchTrackById(client, id);
+    if (track) tracks.push(track);
   }
   return tracks;
 }

@@ -15,7 +15,7 @@ async function initAuth(): Promise<void> {
     clientId,
     clientSecret,
     credentialsStorageKey: CREDENTIALS_STORAGE_KEY,
-    scopes: [],
+    scopes: ["user.read", "collection.read"],
   });
 }
 

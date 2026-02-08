@@ -18,25 +18,3 @@ export function defaultConfigPath(): string {
 export function defaultDatabasePath(): string {
   return path.join(os.homedir(), "clawd", "projects", "curator", "data", "curator.db");
 }
-
-export function defaultTidalSessionPath(): string {
-  return path.join(
-    os.homedir(),
-    "clawd",
-    "projects",
-    "tidal-service",
-    "tidal_session.json"
-  );
-}
-
-export function defaultTidalPythonPath(): string {
-  return path.join(
-    os.homedir(),
-    "clawd",
-    "projects",
-    "tidal-service",
-    ".venv",
-    "bin",
-    "python"
-  );
-}

@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { loadConfig } from "../lib/config";
-import { fetchFavoritesDirect } from "../services/tidalDirect";
 import { TidalServiceClient } from "../services/tidalService";
 import { applySchema, openDatabase, syncFavoriteTracks } from "../db";
+import { getFavoriteTracks, initTidalClient } from "../services/tidalSdk";
 
 type SyncOptions = {
   source?: string;
@@ -10,8 +10,6 @@ type SyncOptions = {
   dryRun?: boolean;
   serviceUrl?: string;
   via?: string;
-  sessionPath?: string;
-  pythonPath?: string;
 };
 
 function parseOnly(value: string | undefined): string[] {
@@ -54,24 +52,24 @@ export async function runSync(options: SyncOptions): Promise<void> {
 
   const config = loadConfig();
   const via = normalizeVia(options.via);
-  const favorites =
-    via === "direct"
-      ? await fetchFavoritesDirect({
-          sessionPath: options.sessionPath ?? config.tidal.session_path,
-          pythonPath: options.pythonPath ?? config.tidal.python_path,
-        })
-      : await new TidalServiceClient(
-          options.serviceUrl ?? config.tidal.service_url
-        ).getFavorites();
+
+  let favoriteTracks: import("../services/tidalService").TidalTrack[];
+
+  if (via === "service") {
+    const svc = new TidalServiceClient(
+      options.serviceUrl ?? config.tidal.service_url
+    );
+    const resp = await svc.getFavorites();
+    favoriteTracks = resp.favorites.tracks;
+  } else {
+    await initTidalClient();
+    favoriteTracks = await getFavoriteTracks();
+  }
 
   const output: string[] = [];
   output.push("Syncing from Tidal...");
   output.push(
-    formatFavoritesSummary(
-      favorites.tracks_count,
-      favorites.albums_count,
-      favorites.artists_count
-    )
+    formatFavoritesSummary(favoriteTracks.length, 0, 0)
   );
 
   if (options.dryRun) {
@@ -83,7 +81,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
   const db = openDatabase(config.database.path);
   try {
     applySchema(db);
-    const result = syncFavoriteTracks(db, favorites.favorites.tracks);
+    const result = syncFavoriteTracks(db, favoriteTracks);
     output.push(
       `  OK Stored: ${result.upsertedTracks} tracks, ${result.favoriteSignals} favorite signals`
     );
@@ -104,8 +102,6 @@ export function registerSyncCommand(program: Command): void {
     .option("--dry-run", "Show what would be synced")
     .option("--via <mode>", "Sync mode (direct|service)", "direct")
     .option("--service-url <url>", "Override Tidal service URL")
-    .option("--session-path <path>", "Path to tidal_session.json")
-    .option("--python-path <path>", "Python interpreter for direct sync")
     .action(async (options: SyncOptions) => {
       await runSync(options);
     });

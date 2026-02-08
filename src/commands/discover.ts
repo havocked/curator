@@ -23,8 +23,6 @@ type DiscoverOptions = {
   format?: string;
   via?: string;
   serviceUrl?: string;
-  sessionPath?: string;
-  pythonPath?: string;
 };
 
 type DiscoverFormat = "json" | "text" | "ids";
@@ -415,8 +413,6 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--limit <count>", "Limit results (default: 50)", (value) => Number.parseInt(value, 10))
     .option("--format <format>", "Output format (json|text|ids)", "json")
     .option("--via <mode>", "Discovery mode (direct)", "direct")
-    .option("--session-path <path>", "Path to tidal_session.json")
-    .option("--python-path <path>", "Python interpreter for direct discovery")
     .action(async (options: DiscoverOptions) => {
       await runDiscover(options);
     });
