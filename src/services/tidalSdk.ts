@@ -116,10 +116,13 @@ type TrackAttrs = NonNullable<TrackResource["attributes"]>;
 type AlbumResource = components["schemas"]["Albums_Resource_Object"];
 type AlbumAttrs = NonNullable<AlbumResource["attributes"]>;
 
+type GenreResource = components["schemas"]["Genres_Resource_Object"];
+
 interface ResolvedMeta {
   artistName?: string | undefined;
   albumTitle?: string | undefined;
   releaseDate?: string | undefined;
+  genres?: string[] | undefined;
 }
 
 function mapTrackResource(
@@ -138,6 +141,9 @@ function mapTrackResource(
       ? new Date(attrs.createdAt).getFullYear()
       : null;
 
+  // Extract tone tags (mood descriptors)
+  const toneTags = (attrs?.toneTags as string[] | undefined) ?? [];
+
   return {
     id: parseInt(track.id, 10),
     title,
@@ -145,6 +151,9 @@ function mapTrackResource(
     album: meta?.albumTitle ?? "Unknown",
     duration: parseDuration(attrs?.duration),
     release_year: releaseYear,
+    popularity: attrs?.popularity ?? null,
+    genres: meta?.genres ?? [],
+    mood: toneTags,
     audio_features: {
       bpm: attrs?.bpm ?? null,
       key: formatKey(attrs?.key, attrs?.keyScale),
@@ -186,7 +195,18 @@ function resolveTrackMeta(
     }
   }
 
-  return { artistName, albumTitle, releaseDate };
+  // Resolve genres
+  const genreIds = rels?.genres?.data?.map((g: { id: string }) => g.id) ?? [];
+  const genres: string[] = [];
+  for (const gid of genreIds) {
+    const genre = includedMap.get(`genres:${gid}`);
+    if (genre?.attributes) {
+      const genreName = (genre.attributes as NonNullable<GenreResource["attributes"]>).genreName;
+      if (genreName) genres.push(genreName);
+    }
+  }
+
+  return { artistName, albumTitle, releaseDate, genres };
 }
 
 /**
@@ -223,7 +243,7 @@ async function fetchTracksByIds(
         query: {
           countryCode: COUNTRY_CODE,
           "filter[id]": chunk,
-          include: ["artists", "albums"],
+          include: ["artists", "albums", "genres"],
         },
       },
     });

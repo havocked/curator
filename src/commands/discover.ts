@@ -225,6 +225,9 @@ export function formatDiscoverAsJson(
       album: track.album,
       duration: track.duration,
       release_year: track.release_year ?? null,
+      popularity: track.popularity ?? null,
+      genres: track.genres?.length ? track.genres : undefined,
+      mood: track.mood?.length ? track.mood : undefined,
       audio_features:
         track.audio_features && (track.audio_features.bpm != null || track.audio_features.key != null)
           ? {

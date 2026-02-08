@@ -14,6 +14,9 @@ export type TidalTrack = {
   album_art?: string | null;
   audio_features?: TidalAudioFeatures;
   release_year?: number | null;
+  popularity?: number | null;
+  genres?: string[];
+  mood?: string[];
 };
 
 export type FavoritesResponse = {

@@ -5,6 +5,9 @@ export interface Track {
   album: string;
   duration: number;
   release_year: number | null;
+  popularity: number | null;
+  genres: string[];
+  mood: string[];
   audio_features: {
     bpm: number | null;
     key: string | null;
