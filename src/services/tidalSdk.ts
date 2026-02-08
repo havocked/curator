@@ -35,6 +35,7 @@ let initialized = false;
 const CREDENTIALS_STORAGE_KEY = "curator-tidal-auth";
 const COUNTRY_CODE = "DE";
 const RATE_LIMIT_MS = 200;
+const BATCH_SIZE = 50;
 
 // --- Init ---
 
@@ -111,30 +112,39 @@ function formatKey(
   return `${readable} ${scale.toLowerCase()}`;
 }
 
-function isTrackResource(item: IncludedResource): item is TrackResource {
-  return item.type === "tracks";
-}
-
 type TrackAttrs = NonNullable<TrackResource["attributes"]>;
+type AlbumResource = components["schemas"]["Albums_Resource_Object"];
+type AlbumAttrs = NonNullable<AlbumResource["attributes"]>;
+
+interface ResolvedMeta {
+  artistName?: string | undefined;
+  albumTitle?: string | undefined;
+  releaseDate?: string | undefined;
+}
 
 function mapTrackResource(
   track: TrackResource,
-  fallbackArtist?: string
+  meta?: ResolvedMeta
 ): Track {
   const attrs = track.attributes as TrackAttrs | undefined;
   const title = attrs?.version
     ? `${attrs.title} (${attrs.version})`
     : (attrs?.title ?? "Unknown");
 
+  // Use album releaseDate if available, fall back to track createdAt
+  const releaseYear = meta?.releaseDate
+    ? new Date(meta.releaseDate).getFullYear()
+    : attrs?.createdAt
+      ? new Date(attrs.createdAt).getFullYear()
+      : null;
+
   return {
     id: parseInt(track.id, 10),
     title,
-    artist: fallbackArtist ?? "Unknown",
-    album: "Unknown",
+    artist: meta?.artistName ?? "Unknown",
+    album: meta?.albumTitle ?? "Unknown",
     duration: parseDuration(attrs?.duration),
-    release_year: attrs?.createdAt
-      ? new Date(attrs.createdAt).getFullYear()
-      : null,
+    release_year: releaseYear,
     audio_features: {
       bpm: attrs?.bpm ?? null,
       key: formatKey(attrs?.key, attrs?.keyScale),
@@ -142,19 +152,99 @@ function mapTrackResource(
   };
 }
 
-async function fetchTrackById(
+/**
+ * Resolve artist name and album title/releaseDate from included resources.
+ */
+function resolveTrackMeta(
+  track: TrackResource,
+  includedMap: Map<string, IncludedResource>
+): ResolvedMeta {
+  const rels = track.relationships as Record<
+    string,
+    { data?: Array<{ id: string; type: string }> }
+  > | undefined;
+
+  let artistName: string | undefined;
+  let albumTitle: string | undefined;
+  let releaseDate: string | undefined;
+
+  const artistId = rels?.artists?.data?.[0]?.id;
+  if (artistId) {
+    const artist = includedMap.get(`artists:${artistId}`);
+    if (artist?.attributes) {
+      artistName = (artist.attributes as NonNullable<ArtistResource["attributes"]>).name;
+    }
+  }
+
+  const albumId = rels?.albums?.data?.[0]?.id;
+  if (albumId) {
+    const album = includedMap.get(`albums:${albumId}`);
+    if (album?.attributes) {
+      const albumAttrs = album.attributes as AlbumAttrs;
+      albumTitle = albumAttrs.title;
+      releaseDate = albumAttrs.releaseDate ?? undefined;
+    }
+  }
+
+  return { artistName, albumTitle, releaseDate };
+}
+
+/**
+ * Build a lookup map from included resources: "type:id" -> resource
+ */
+function buildIncludedMap(
+  included: IncludedResource[]
+): Map<string, IncludedResource> {
+  const map = new Map<string, IncludedResource>();
+  for (const item of included) {
+    map.set(`${item.type}:${item.id}`, item);
+  }
+  return map;
+}
+
+/**
+ * Batch-fetch tracks by IDs with artist + album resolution.
+ * Chunks into batches of BATCH_SIZE to stay within URL length limits.
+ */
+async function fetchTracksByIds(
   client: ApiClient,
-  trackId: string,
-  fallbackArtist?: string
-): Promise<Track | null> {
-  const { data } = await client.GET("/tracks/{id}", {
-    params: {
-      path: { id: trackId },
-      query: { countryCode: COUNTRY_CODE },
-    },
-  });
-  if (!data?.data) return null;
-  return mapTrackResource(data.data, fallbackArtist);
+  trackIds: string[]
+): Promise<Track[]> {
+  if (trackIds.length === 0) return [];
+
+  const allTracks: Track[] = [];
+
+  for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
+    if (i > 0) await delay(RATE_LIMIT_MS);
+
+    const chunk = trackIds.slice(i, i + BATCH_SIZE);
+    const { data } = await client.GET("/tracks", {
+      params: {
+        query: {
+          countryCode: COUNTRY_CODE,
+          "filter[id]": chunk,
+          include: ["artists", "albums"],
+        },
+      },
+    });
+
+    const included = data?.included ?? [];
+    const includedMap = buildIncludedMap(included);
+
+    for (const track of data?.data ?? []) {
+      const meta = resolveTrackMeta(track as TrackResource, includedMap);
+      allTracks.push(mapTrackResource(track as TrackResource, meta));
+    }
+  }
+
+  // Preserve original ID order (API may return in different order)
+  const trackMap = new Map(allTracks.map((t) => [String(t.id), t]));
+  const ordered: Track[] = [];
+  for (const id of trackIds) {
+    const track = trackMap.get(id);
+    if (track) ordered.push(track);
+  }
+  return ordered;
 }
 
 // --- Search ---
@@ -216,8 +306,7 @@ export async function searchArtists(
 
 export async function getArtistTopTracks(
   artistId: number,
-  limit = 10,
-  artistName?: string
+  limit = 10
 ): Promise<Track[]> {
   const client = getClient();
 
@@ -235,14 +324,7 @@ export async function getArtistTopTracks(
   const trackIds = data?.data?.map((r: ResourceId) => r.id) ?? [];
   if (trackIds.length === 0) return [];
 
-  // Fetch each track individually (reliable across all conditions)
-  const tracks: Track[] = [];
-  for (const id of trackIds.slice(0, limit)) {
-    await delay(RATE_LIMIT_MS);
-    const track = await fetchTrackById(client, id, artistName);
-    if (track) tracks.push(track);
-  }
-  return tracks;
+  return fetchTracksByIds(client, trackIds.slice(0, limit));
 }
 
 // --- Playlists ---
@@ -297,7 +379,6 @@ export async function getPlaylistTracks(
       path: { id: playlistId },
       query: {
         countryCode: COUNTRY_CODE,
-        include: ["items"],
         "page[limit]": limit,
       },
     },
@@ -309,27 +390,7 @@ export async function getPlaylistTracks(
       ?.filter((r: ResourceId) => r.type === "tracks")
       .map((r: ResourceId) => r.id) ?? [];
 
-  // Use included data if available, otherwise fetch individually
-  const included = data?.included ?? [];
-  const trackMap = new Map<string, TrackResource>();
-  for (const item of included) {
-    if (isTrackResource(item)) {
-      trackMap.set(item.id, item);
-    }
-  }
-
-  const tracks: Track[] = [];
-  for (const id of trackIds.slice(0, limit)) {
-    const cached = trackMap.get(id);
-    if (cached) {
-      tracks.push(mapTrackResource(cached));
-    } else {
-      await delay(RATE_LIMIT_MS);
-      const track = await fetchTrackById(client, id);
-      if (track) tracks.push(track);
-    }
-  }
-  return tracks;
+  return fetchTracksByIds(getClient(), trackIds.slice(0, limit));
 }
 
 // --- User Favorites ---
@@ -399,19 +460,13 @@ export async function getFavoriteTracks(limit = 500): Promise<Track[]> {
   const trackIds = allTrackIds.slice(0, limit);
   if (trackIds.length === 0) return [];
 
-  // Use included track data when available, fetch individually otherwise
-  const tracks: Track[] = [];
-  for (const id of trackIds) {
-    await delay(RATE_LIMIT_MS);
-    const track = await fetchTrackById(client, id);
-    if (track) tracks.push(track);
-  }
-  return tracks;
+  return fetchTracksByIds(client, trackIds);
 }
 
 // --- Single Track ---
 
 export async function getTrack(trackId: number): Promise<Track | null> {
   const client = getClient();
-  return fetchTrackById(client, String(trackId));
+  const tracks = await fetchTracksByIds(client, [String(trackId)]);
+  return tracks[0] ?? null;
 }

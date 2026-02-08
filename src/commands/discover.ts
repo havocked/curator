@@ -145,7 +145,7 @@ async function discoverByArtists(
     console.error(`[discover] Getting tracks for artist: ${artist.name} (ID: ${artist.id})`);
     // Small delay to avoid rate limiting after search requests
     await wait(300);
-    const tracks = await getArtistTopTracks(artist.id, limitPerArtist, artist.name);
+    const tracks = await getArtistTopTracks(artist.id, limitPerArtist);
     console.error(`[discover] Got ${tracks.length} tracks`);
     collected.push(...tracks);
   }
