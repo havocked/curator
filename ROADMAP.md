@@ -29,9 +29,13 @@
 
 ## Next Steps
 
-### New Features
-- `--year-range` filter (e.g. `--year-range 1990-2000`)
+### ✅ Recently Completed
 - `--popularity-min` / `--popularity-max` filter (hidden gems vs. hits)
+- `--year-min` / `--year-max` filter (release year range)
+- 26 tests passing
+
+### New Features
+- `discover --album <id>` (fetch all tracks from a specific album — needed for complete album discovery vs top-tracks sampling)
 - `curator playlist create` (write playlists to Tidal)
 - `--evolution decade` (decade walker engine)
 

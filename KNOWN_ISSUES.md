@@ -40,7 +40,33 @@ Track genres and mood (toneTags) fields are always empty. The genre-related API 
 
 ---
 
-### 4. Album Release Year May Be Inaccurate
+### 4. Artist Top Tracks Capped at 20
+
+**Severity:** Medium
+
+Tidal's `GET /artists/{id}/relationships/tracks` ignores the `page[limit]` parameter and always returns a maximum of 20 tracks. Setting `--limit-per-artist` above 20 has no effect.
+
+**Impact:** When combining `--artists` with filters (`--popularity-min/max`, `--year-min/max`), results can be sparse — you're filtering from a pool of at most 20 tracks per artist.
+
+**Workaround:** Use `--genre` search for broader results, or combine multiple artists to increase the pool.
+
+**No fix available** — Tidal API hard limit.
+
+---
+
+### 5. Genre Search Is Keyword-Based, Not Genre-Aware
+
+**Severity:** Medium
+
+`--genre "classical"` searches for the word "classical" in track/album/artist metadata — it doesn't filter by actual music genre. This means results often include unrelated tracks (e.g. Vampire Weekend's "Classical", Gucci Mane "Classical Intro").
+
+**Workaround:** Use more specific terms (`"beethoven sonata"` instead of `"classical"`) or use `--artists` for precise results.
+
+**Root cause:** Tidal's genre taxonomy is internal-only (see issue #3). The search endpoint is all we have.
+
+---
+
+### 6. Album Release Year May Be Inaccurate
 
 **Severity:** Low
 
