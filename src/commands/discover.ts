@@ -3,6 +3,7 @@ import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import { getLabelArtists, searchLabel } from "../providers/musicbrainz";
 import {
+  getAlbumTracks,
   getArtistTopTracks,
   getPlaylistTracks,
   initTidalClient,
@@ -13,6 +14,7 @@ import type { Track } from "../services/types";
 
 type DiscoverOptions = {
   playlist?: string;
+  album?: string;
   genre?: string;
   tags?: string;
   artists?: string;
@@ -33,6 +35,7 @@ type DiscoverFormat = "json" | "text" | "ids";
 
 type DiscoverQuery = {
   playlist?: string;
+  album?: string;
   genre?: string;
   tags?: string[];
   artists?: string[];
@@ -221,14 +224,17 @@ export function formatDiscoverAsJson(
     ? "label"
     : query.artists
       ? "artists"
-      : query.playlist
-        ? "playlist"
-        : "search";
+      : query.album
+        ? "album"
+        : query.playlist
+          ? "playlist"
+          : "search";
   const output = {
     count: tracks.length,
     source,
     query: {
       playlist: query.playlist,
+      album: query.album,
       genre: query.genre,
       tags: query.tags,
       artists: query.artists,
@@ -276,6 +282,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   normalizeVia(options.via);
 
   let playlistId: string | undefined;
+  let albumId: string | undefined;
   let artistNames: string[] | undefined;
   let labelName: string | undefined;
   let tracks: Track[] = [];
@@ -312,6 +319,15 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided artists.");
     }
+  } else if (options.album) {
+    await initTidalClient();
+    albumId = options.album;
+    console.error(`[discover] Fetching album tracks: ${albumId}`);
+    tracks = await getAlbumTracks(albumId, limit);
+    console.error(`[discover] Got ${tracks.length} tracks`);
+    if (tracks.length === 0) {
+      throw new Error(`No tracks found for album: ${albumId}`);
+    }
   } else if (options.playlist) {
     await initTidalClient();
     playlistId = options.playlist;
@@ -321,7 +337,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     const genre = options.genre?.trim();
     if (!genre && tags.length === 0) {
       throw new Error(
-        "Provide --playlist, --artists, --label, or --genre/--tags to discover tracks."
+        "Provide --playlist, --album, --artists, --label, or --genre/--tags to discover tracks."
       );
     }
 
@@ -357,11 +373,13 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   const db = openDatabase(config.database.path);
   const discoveredVia = labelName
     ? `label:${labelName.toLowerCase()}`
-    : playlistId
-      ? `playlist:${playlistId}`
-      : artistNames
-        ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
-        : `search:${(options.genre ?? "unknown").toLowerCase()}`;
+    : albumId
+      ? `album:${albumId}`
+      : playlistId
+        ? `playlist:${playlistId}`
+        : artistNames
+          ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
+          : `search:${(options.genre ?? "unknown").toLowerCase()}`;
   try {
     applySchema(db);
     upsertDiscoveredTracks(db, tracks, discoveredVia);
@@ -372,11 +390,13 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   if (format === "text") {
     const sourceLabel = labelName
       ? `label:${labelName}`
-      : playlistId
-        ? `playlist:${playlistId}`
-        : artistNames
-          ? `artists:${artistNames.join(", ")}`
-          : "playlist-search";
+      : albumId
+        ? `album:${albumId}`
+        : playlistId
+          ? `playlist:${playlistId}`
+          : artistNames
+            ? `artists:${artistNames.join(", ")}`
+            : "playlist-search";
     console.log(formatDiscoverAsText(sourceLabel, tracks));
     return;
   }
@@ -393,6 +413,9 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   const tags = parseTags(options.tags);
   if (playlistId) {
     query.playlist = playlistId;
+  }
+  if (albumId) {
+    query.album = albumId;
   }
   if (artistNames && artistNames.length > 0) {
     query.artists = artistNames;
@@ -415,6 +438,7 @@ export function registerDiscoverCommand(program: Command): void {
     .command("discover")
     .description("Discover new tracks from Tidal catalog")
     .option("--playlist <id>", "Discover tracks from a playlist ID")
+    .option("--album <id>", "Discover all tracks from an album")
     .option("--genre <genre>", "Discover tracks by genre")
     .option("--tags <tags>", "Comma-separated tags to refine genre search")
     .option("--artists <names>", "Comma-separated artist names")

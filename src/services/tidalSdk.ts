@@ -376,6 +376,51 @@ export async function getArtistTopTracks(
   return fetchTracksByIds(client, trackIds.slice(0, limit));
 }
 
+// --- Albums ---
+
+export async function getAlbumTracks(
+  albumId: string,
+  limit = 100
+): Promise<Track[]> {
+  const client = getClient();
+  const allTrackIds: string[] = [];
+  let cursor: string | undefined;
+
+  while (allTrackIds.length < limit) {
+    const { data } = await client.GET("/albums/{id}/relationships/items", {
+      params: {
+        path: { id: albumId },
+        query: {
+          countryCode: COUNTRY_CODE,
+          ...(cursor ? { "page[cursor]": cursor } : {}),
+        },
+      },
+    });
+
+    const ids =
+      (data as { data?: ResourceId[] })?.data
+        ?.filter((r) => r.type === "tracks")
+        .map((r) => r.id) ?? [];
+
+    if (ids.length === 0) break;
+    allTrackIds.push(...ids);
+
+    // Check for next page
+    const links = (data as { links?: { next?: string } })?.links;
+    if (links?.next) {
+      const url = new URL(links.next, "https://openapi.tidal.com");
+      cursor = url.searchParams.get("page[cursor]") ?? undefined;
+      if (!cursor) break;
+      await delay(RATE_LIMIT_MS);
+    } else {
+      break;
+    }
+  }
+
+  if (allTrackIds.length === 0) return [];
+  return fetchTracksByIds(client, allTrackIds.slice(0, limit));
+}
+
 // --- Playlists ---
 
 export async function getPlaylistTracks(
