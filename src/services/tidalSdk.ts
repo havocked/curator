@@ -4,7 +4,7 @@ import { trueTime } from "@tidal-music/true-time";
 import fs from "fs";
 import path from "path";
 import { expandHome } from "../lib/paths";
-import type { Artist, Playlist, Track } from "./types";
+import type { Artist, Track } from "./types";
 
 // Suppress noisy "TrueTime is not yet synchronized" from SDK internals
 const _origWarn = console.warn;
@@ -370,45 +370,6 @@ export async function getArtistTopTracks(
 }
 
 // --- Playlists ---
-
-export async function searchPlaylists(
-  query: string,
-  limit = 10
-): Promise<Playlist[]> {
-  const client = getClient();
-
-  const { data: searchData } = await client.GET(
-    "/searchResults/{id}/relationships/playlists",
-    {
-      params: {
-        path: { id: query },
-        query: { countryCode: COUNTRY_CODE, "page[limit]": limit },
-      },
-    }
-  );
-
-  const ids = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
-  if (ids.length === 0) return [];
-
-  const playlists: Playlist[] = [];
-  for (const id of ids.slice(0, limit)) {
-    await delay(RATE_LIMIT_MS);
-    const { data } = await client.GET("/playlists/{id}", {
-      params: {
-        path: { id },
-        query: { countryCode: COUNTRY_CODE },
-      },
-    });
-    const playlist = data?.data;
-    if (!playlist?.attributes) continue;
-    playlists.push({
-      id: playlist.id,
-      title: playlist.attributes.name ?? "Unknown",
-      description: playlist.attributes.description ?? "",
-    });
-  }
-  return playlists;
-}
 
 export async function getPlaylistTracks(
   playlistId: string,

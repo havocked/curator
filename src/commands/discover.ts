@@ -7,7 +7,6 @@ import {
   getPlaylistTracks,
   initTidalClient,
   searchArtists,
-  searchPlaylists,
   searchTracks,
 } from "../services/tidalSdk";
 import type { TidalTrack } from "../services/tidalService";
@@ -35,7 +34,6 @@ type DiscoverQuery = {
   artists?: string[];
   label?: string;
   limit: number;
-  playlistIds?: string[];
 };
 
 function normalizeFormat(value: string | undefined): DiscoverFormat {
@@ -80,32 +78,22 @@ export function parseArtists(value: string | undefined): string[] {
     .filter((name) => name.length > 0);
 }
 
-export function buildPlaylistQueries(
+export function buildSearchQuery(
   genre: string | undefined,
   tags: string[]
-): string[] {
-  const queries: string[] = [];
+): string {
+  const parts: string[] = [];
   const normalizedGenre = genre?.trim();
   if (normalizedGenre) {
-    queries.push(normalizedGenre);
+    parts.push(normalizedGenre);
   }
-
   for (const tag of tags) {
-    if (normalizedGenre) {
-      queries.push(`${normalizedGenre} ${tag}`);
+    const t = tag.trim();
+    if (t && !parts.includes(t)) {
+      parts.push(t);
     }
-    queries.push(tag);
   }
-
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const query of queries) {
-    const key = query.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(query);
-  }
-  return unique;
+  return parts.join(" ");
 }
 
 export function dedupeTracks(tracks: TidalTrack[]): TidalTrack[] {
@@ -217,7 +205,6 @@ export function formatDiscoverAsJson(
       artists: query.artists,
       label: query.label,
       limit,
-      playlists: query.playlistIds,
     },
     tracks: tracks.map((track) => ({
       id: track.id,
@@ -313,20 +300,11 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
 
     await initTidalClient();
 
-    // Build search queries from genre + tags
-    const queries = buildPlaylistQueries(genre, tags);
-    const collected: TidalTrack[] = [];
-
-    // Search tracks directly (much more accurate than playlist search)
-    for (const query of queries) {
-      if (collected.length >= limit) break;
-      console.error(`[discover] Searching tracks: ${query}`);
-      const found = await searchTracks(query, limit);
-      console.error(`[discover] Found ${found.length} tracks`);
-      collected.push(...found);
-    }
-
-    tracks = dedupeTracks(collected).slice(0, limit);
+    const query = buildSearchQuery(genre, tags);
+    console.error(`[discover] Searching tracks: ${query}`);
+    const found = await searchTracks(query, limit);
+    console.error(`[discover] Found ${found.length} tracks`);
+    tracks = found.slice(0, limit);
 
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided genre/tags.");

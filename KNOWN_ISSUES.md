@@ -20,30 +20,7 @@ curator discover --artists "Justice,Mr. Oizo,Busy P,SebastiAn" --limit-per-artis
 
 ---
 
-### 2. Track Artist/Album Shows "Unknown"
-
-**Severity:** Medium
-
-Tracks from playlist/genre/favorites discovery show "Unknown" for artist and album.
-Artist discovery (`--artists`) has the artist name as fallback but album is still "Unknown".
-
-**Root cause:** Tidal v2 API uses JSON:API format — track resources only contain IDs for artist/album relationships. Need to `include` those relationships or fetch them separately.
-
-**Planned fix:** Step 7 — add `include: ["artists", "albums"]` to track fetches.
-
----
-
-### 3. Inaccurate Release Year
-
-**Severity:** Low
-
-`release_year` uses `createdAt` from track attributes, which is when the track was added to Tidal's catalog, not the actual release date. e.g. IAM's "Je danse le Mia" (1994) shows as 2008.
-
-**Planned fix:** Resolve album relationship and use album release date instead.
-
----
-
-### 4. BPM/Key Data Sparse
+### 2. BPM/Key Data Sparse
 
 **Severity:** Low
 
@@ -53,7 +30,33 @@ Official API v2 has BPM and key in the type schema, but many tracks return null 
 
 ---
 
+### 3. Genres/Mood Tags Empty
+
+**Severity:** Low
+
+Track genres and mood (toneTags) fields are always empty. The genre-related API endpoints (`GET /genres`, `GET /tracks/{id}/relationships/genres`) are marked `INTERNAL` access tier — available to Tidal's own apps but not to external developers.
+
+**Impact:** None for discovery — `--genre` uses direct track search which works great. The empty fields don't affect functionality.
+
+---
+
+### 4. Album Release Year May Be Inaccurate
+
+**Severity:** Low
+
+Release year comes from the album's `releaseDate` field. For tracks on reissue/compilation albums, this reflects the reissue date, not the original release. e.g. IAM's "Je danse le Mia" (originally 1994) shows as 2006 because the track is on a "Platinum" compilation.
+
+**No fix available** — Tidal catalog limitation. Most tracks show correct years.
+
+---
+
 ## Resolved
 
 ### ~~Python Dependency~~ ✅ (Fixed 2026-02-08)
-Removed all Python/subprocess dependencies. Curator is now 100% TypeScript + official SDK.
+Removed all Python/subprocess dependencies. Pure TypeScript + official SDK.
+
+### ~~Track Artist/Album Shows "Unknown"~~ ✅ (Fixed 2026-02-08)
+Batch fetch with `include: ["artists", "albums"]` resolves all metadata in one API call.
+
+### ~~Genre Discovery Returns Off-Topic Results~~ ✅ (Fixed 2026-02-08)
+Replaced playlist-based search with direct track search via `searchResults/{id}/relationships/tracks`.
