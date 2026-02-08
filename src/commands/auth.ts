@@ -88,10 +88,8 @@ async function checkStatus(): Promise<void> {
     const credentials = await auth.credentialsProvider.getCredentials();
 
     if (credentials && "token" in credentials && credentials.token) {
-      const userId =
-        "userId" in credentials ? (credentials as any).userId : null;
+      const userId = "userId" in credentials ? credentials.userId : null;
 
-      // Client-credentials-only tokens have no userId
       if (!userId) {
         console.log(
           "⚠️  Client credentials only (no user session). Run: curator auth login"
@@ -100,13 +98,11 @@ async function checkStatus(): Promise<void> {
       }
 
       console.log("✅ Logged in");
-      console.log(`User ID: ${userId}`);
+      console.log(`User ID: ${String(userId)}`);
       console.log(`Token: ${credentials.token.slice(0, 30)}...`);
 
-      if ("expires" in credentials && credentials.expires) {
-        const expiresIn = Math.round(
-          ((credentials.expires as number) - Date.now()) / 1000
-        );
+      if ("expires" in credentials && typeof credentials.expires === "number") {
+        const expiresIn = Math.round((credentials.expires - Date.now()) / 1000);
         if (expiresIn > 0) {
           console.log(`Expires in: ${Math.round(expiresIn / 60)} minutes`);
         } else {

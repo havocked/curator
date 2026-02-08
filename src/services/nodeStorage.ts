@@ -64,15 +64,15 @@ class NodeStorage implements Storage {
   }
 }
 
+// globalThis polyfills for Node.js — the Tidal SDK expects browser globals
+const g = globalThis as Record<string, unknown>;
+
 export function installNodeStorage(): void {
-  // Install localStorage polyfill (force override - auth SDK sets a broken one)
-  const storage = new NodeStorage();
-  (globalThis as any).localStorage = storage;
-  
-  // Install minimal EventTarget polyfills (auth SDK needs these)
-  if (typeof (globalThis as any).dispatchEvent === "undefined") {
-    (globalThis as any).dispatchEvent = () => true;
-    (globalThis as any).addEventListener = () => {};
-    (globalThis as any).removeEventListener = () => {};
+  g.localStorage = new NodeStorage();
+
+  if (typeof g.dispatchEvent === "undefined") {
+    g.dispatchEvent = () => true;
+    g.addEventListener = () => {};
+    g.removeEventListener = () => {};
   }
 }

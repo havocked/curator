@@ -1,39 +1,46 @@
-import { createAPIClient } from "@tidal-music/api";
+import { createAPIClient, type components } from "@tidal-music/api";
 import * as auth from "@tidal-music/auth";
 import fs from "fs";
 import path from "path";
 import { expandHome } from "../lib/paths";
 import type { Artist, Playlist, Track } from "./types";
 
-type Credentials = {
-  clientId: string;
-  clientSecret: string;
-};
+// --- SDK Types ---
 
 type ApiClient = ReturnType<typeof createAPIClient>;
+type ResourceId = components["schemas"]["Resource_Identifier"];
+type TrackResource = components["schemas"]["Tracks_Resource_Object"];
+type ArtistResource = components["schemas"]["Artists_Resource_Object"];
+type IncludedResource = components["schemas"]["Included"][number];
+
+interface Credentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+// --- State ---
 
 let apiClient: ApiClient | null = null;
 let initialized = false;
 
 const CREDENTIALS_STORAGE_KEY = "curator-tidal-auth";
 const COUNTRY_CODE = "DE";
+const RATE_LIMIT_MS = 200;
+
+// --- Init ---
 
 export function loadCredentials(): Credentials {
   const configPath = expandHome(
-    path.join(process.env.HOME || "", ".config", "curator", "credentials.json")
+    path.join(process.env.HOME ?? "", ".config", "curator", "credentials.json")
   );
-
   if (!fs.existsSync(configPath)) {
     throw new Error(`Missing credentials file: ${configPath}`);
   }
-
   return JSON.parse(fs.readFileSync(configPath, "utf-8")) as Credentials;
 }
 
 export async function initTidalClient(): Promise<void> {
-  if (apiClient) {
-    return;
-  }
+  if (apiClient) return;
 
   const { clientId, clientSecret } = loadCredentials();
 
@@ -47,19 +54,13 @@ export async function initTidalClient(): Promise<void> {
     initialized = true;
   }
 
-  // Verify we have valid USER credentials (not just client credentials)
-  try {
-    const creds = await auth.credentialsProvider.getCredentials();
-    if (!creds || !("token" in creds) || !creds.token) {
-      throw new Error("No valid token");
-    }
-    if (!("userId" in creds) || !(creds as any).userId) {
-      throw new Error("No user session");
-    }
-  } catch {
-    throw new Error(
-      "Not logged in or token expired. Run: curator auth login"
-    );
+  // Verify user session (not just client credentials)
+  const creds = await auth.credentialsProvider.getCredentials();
+  if (!creds || !("token" in creds) || !creds.token) {
+    throw new Error("Not logged in. Run: curator auth login");
+  }
+  if (!("userId" in creds) || !creds.userId) {
+    throw new Error("No user session. Run: curator auth login");
   }
 
   apiClient = createAPIClient(auth.credentialsProvider);
@@ -67,30 +68,94 @@ export async function initTidalClient(): Promise<void> {
 
 export function getClient(): ApiClient {
   if (!apiClient) {
-    throw new Error(
-      "Tidal client not initialized. Call initTidalClient() first."
-    );
+    throw new Error("Tidal client not initialized. Call initTidalClient() first.");
   }
   return apiClient;
 }
 
-// --- Search ---
-
-const RATE_LIMIT_MS = 200;
+// --- Helpers ---
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseDuration(iso: string | undefined | null): number {
+  if (!iso) return 0;
+  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return 0;
+  return (
+    parseInt(match[1] ?? "0", 10) * 3600 +
+    parseInt(match[2] ?? "0", 10) * 60 +
+    parseInt(match[3] ?? "0", 10)
+  );
+}
+
+function formatKey(
+  key: string | undefined | null,
+  scale: string | undefined | null
+): string | null {
+  if (!key || key === "UNKNOWN") return null;
+  const readable = key.replace("Sharp", "#");
+  if (!scale || scale === "UNKNOWN") return readable;
+  return `${readable} ${scale.toLowerCase()}`;
+}
+
+function isTrackResource(item: IncludedResource): item is TrackResource {
+  return item.type === "tracks";
+}
+
+type TrackAttrs = NonNullable<TrackResource["attributes"]>;
+
+function mapTrackResource(
+  track: TrackResource,
+  fallbackArtist?: string
+): Track {
+  const attrs = track.attributes as TrackAttrs | undefined;
+  const title = attrs?.version
+    ? `${attrs.title} (${attrs.version})`
+    : (attrs?.title ?? "Unknown");
+
+  return {
+    id: parseInt(track.id, 10),
+    title,
+    artist: fallbackArtist ?? "Unknown",
+    album: "Unknown",
+    duration: parseDuration(attrs?.duration),
+    release_year: attrs?.createdAt
+      ? new Date(attrs.createdAt).getFullYear()
+      : null,
+    audio_features: {
+      bpm: attrs?.bpm ?? null,
+      key: formatKey(attrs?.key, attrs?.keyScale),
+    },
+  };
+}
+
+async function fetchTrackById(
+  client: ApiClient,
+  trackId: string,
+  fallbackArtist?: string
+): Promise<Track | null> {
+  const { data } = await client.GET("/tracks/{id}", {
+    params: {
+      path: { id: trackId },
+      query: { countryCode: COUNTRY_CODE },
+    },
+  });
+  if (!data?.data) return null;
+  return mapTrackResource(data.data, fallbackArtist);
+}
+
+// --- Search ---
+
 export async function searchArtists(
   query: string,
   limit = 10
 ): Promise<Artist[]> {
-  const client = getClient() as any;
-
-  // Fetch a small batch — API returns in relevance order
+  const client = getClient();
   const fetchLimit = Math.min(Math.max(limit, 3), 10);
-  const searchRes = await client.GET(
+
+  const { data: searchData } = await client.GET(
     "/searchResults/{id}/relationships/artists",
     {
       params: {
@@ -100,71 +165,72 @@ export async function searchArtists(
     }
   );
 
-  const ids = (searchRes.data?.data as any[])?.map((a: any) => a.id) ?? [];
+  const ids = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
   if (ids.length === 0) return [];
 
-  // Fetch artist details with rate limiting
-  const artists: (Artist & { popularity: number; nameMatch: boolean })[] = [];
+  // Fetch details with rate limiting + name matching
+  const candidates: Array<Artist & { popularity: number; exactMatch: boolean }> = [];
+
   for (const id of ids) {
     await delay(RATE_LIMIT_MS);
-    const res = await client.GET("/artists/{id}", {
+    const { data } = await client.GET("/artists/{id}", {
       params: {
         path: { id },
         query: { countryCode: COUNTRY_CODE },
       },
     });
-    const data = res.data?.data;
-    if (data) {
-      const name = data.attributes?.name || "Unknown";
-      artists.push({
-        id: parseInt(data.id, 10),
-        name,
-        picture: null,
-        popularity: data.attributes?.popularity ?? 0,
-        nameMatch: name.toLowerCase() === query.toLowerCase(),
-      });
-    }
+    const artist = data?.data;
+    if (!artist?.attributes) continue;
+
+    const name = artist.attributes.name;
+    candidates.push({
+      id: parseInt(artist.id, 10),
+      name,
+      picture: null,
+      popularity: artist.attributes.popularity ?? 0,
+      exactMatch: name.toLowerCase() === query.toLowerCase(),
+    });
   }
 
-  // Prioritize: exact name match first, then by popularity
-  artists.sort((a, b) => {
-    if (a.nameMatch !== b.nameMatch) return a.nameMatch ? -1 : 1;
+  // Exact name match first, then popularity
+  candidates.sort((a, b) => {
+    if (a.exactMatch !== b.exactMatch) return a.exactMatch ? -1 : 1;
     return b.popularity - a.popularity;
   });
 
-  return artists.slice(0, limit).map(({ popularity, nameMatch, ...a }) => a);
+  return candidates.slice(0, limit).map(({ popularity, exactMatch, ...a }) => a);
 }
+
+// --- Artist Tracks ---
 
 export async function getArtistTopTracks(
   artistId: number,
   limit = 10,
   artistName?: string
 ): Promise<Track[]> {
-  const client = getClient() as any;
+  const client = getClient();
 
-  // Step 1: Get track IDs for this artist
-  const res = await client.GET("/artists/{id}/relationships/tracks", {
+  const { data } = await client.GET("/artists/{id}/relationships/tracks", {
     params: {
       path: { id: String(artistId) },
       query: {
         countryCode: COUNTRY_CODE,
-        collapseBy: "FINGERPRINT" as const,
+        collapseBy: "FINGERPRINT",
         "page[limit]": limit,
       },
     },
   });
 
-  const trackIds = (res.data?.data as any[])?.map((t: any) => t.id) ?? [];
+  const trackIds = data?.data?.map((r: ResourceId) => r.id) ?? [];
   if (trackIds.length === 0) return [];
 
-  // Step 2: Fetch each track's details individually (reliable, avoids include parsing issues)
+  // Fetch each track individually (reliable across all conditions)
   const tracks: Track[] = [];
   for (const id of trackIds.slice(0, limit)) {
     await delay(RATE_LIMIT_MS);
-    const detail = await fetchTrackWithArtists(client, id, artistName);
-    if (detail) tracks.push(detail);
+    const track = await fetchTrackById(client, id, artistName);
+    if (track) tracks.push(track);
   }
-
   return tracks;
 }
 
@@ -174,9 +240,9 @@ export async function searchPlaylists(
   query: string,
   limit = 10
 ): Promise<Playlist[]> {
-  const client = getClient() as any;
+  const client = getClient();
 
-  const searchRes = await client.GET(
+  const { data: searchData } = await client.GET(
     "/searchResults/{id}/relationships/playlists",
     {
       params: {
@@ -186,28 +252,26 @@ export async function searchPlaylists(
     }
   );
 
-  const ids =
-    (searchRes.data?.data as any[])?.map((p: any) => p.id) ?? [];
+  const ids = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
   if (ids.length === 0) return [];
 
   const playlists: Playlist[] = [];
   for (const id of ids.slice(0, limit)) {
-    const res = await client.GET("/playlists/{id}", {
+    await delay(RATE_LIMIT_MS);
+    const { data } = await client.GET("/playlists/{id}", {
       params: {
         path: { id },
         query: { countryCode: COUNTRY_CODE },
       },
     });
-    const data = res.data?.data;
-    if (data) {
-      playlists.push({
-        id: data.id,
-        title: data.attributes?.name || "Unknown",
-        description: data.attributes?.description || "",
-      });
-    }
+    const playlist = data?.data;
+    if (!playlist?.attributes) continue;
+    playlists.push({
+      id: playlist.id,
+      title: playlist.attributes.name ?? "Unknown",
+      description: playlist.attributes.description ?? "",
+    });
   }
-
   return playlists;
 }
 
@@ -215,9 +279,9 @@ export async function getPlaylistTracks(
   playlistId: string,
   limit = 100
 ): Promise<Track[]> {
-  const client = getClient() as any;
+  const client = getClient();
 
-  const res = await client.GET("/playlists/{id}/relationships/items", {
+  const { data } = await client.GET("/playlists/{id}/relationships/items", {
     params: {
       path: { id: playlistId },
       query: {
@@ -228,109 +292,38 @@ export async function getPlaylistTracks(
     },
   });
 
-  const included = (res.data?.included as any[]) ?? [];
-  const itemIds =
-    (res.data?.data as any[])
-      ?.filter((item: any) => item.type === "tracks")
-      .map((item: any) => item.id) ?? [];
+  // Extract track IDs from relationship data
+  const trackIds =
+    data?.data
+      ?.filter((r: ResourceId) => r.type === "tracks")
+      .map((r: ResourceId) => r.id) ?? [];
 
-  const trackMap = new Map<string, any>();
+  // Use included data if available, otherwise fetch individually
+  const included = data?.included ?? [];
+  const trackMap = new Map<string, TrackResource>();
   for (const item of included) {
-    if (item.type === "tracks") {
+    if (isTrackResource(item)) {
       trackMap.set(item.id, item);
     }
   }
 
   const tracks: Track[] = [];
-  for (const id of itemIds.slice(0, limit)) {
-    const trackData = trackMap.get(id);
-    if (trackData) {
-      tracks.push(mapTrackFromApi(trackData));
+  for (const id of trackIds.slice(0, limit)) {
+    const cached = trackMap.get(id);
+    if (cached) {
+      tracks.push(mapTrackResource(cached));
+    } else {
+      await delay(RATE_LIMIT_MS);
+      const track = await fetchTrackById(client, id);
+      if (track) tracks.push(track);
     }
   }
-
   return tracks;
 }
 
 // --- Single Track ---
 
 export async function getTrack(trackId: number): Promise<Track | null> {
-  const client = getClient() as any;
-  return fetchTrackWithArtists(client, String(trackId));
-}
-
-// --- Helpers ---
-
-async function fetchTrackWithArtists(
-  client: any,
-  trackId: string,
-  fallbackArtistName?: string
-): Promise<Track | null> {
-  const res = await client.GET("/tracks/{id}", {
-    params: {
-      path: { id: trackId },
-      query: { countryCode: COUNTRY_CODE },
-    },
-  });
-
-  if (!res.data?.data) return null;
-  return mapTrackFromApi(res.data.data, fallbackArtistName);
-}
-
-/**
- * Parse ISO 8601 duration (PT4M2S) to seconds.
- */
-function parseDuration(iso: string | null | undefined): number {
-  if (!iso) return 0;
-  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!match) return 0;
-  const hours = parseInt(match[1] || "0", 10);
-  const minutes = parseInt(match[2] || "0", 10);
-  const seconds = parseInt(match[3] || "0", 10);
-  return hours * 3600 + minutes * 60 + seconds;
-}
-
-function mapTrackFromApi(
-  apiTrack: any,
-  fallbackArtistName?: string
-): Track {
-  const attrs = apiTrack.attributes || {};
-
-  // Try to get artist name from relationships data (if populated)
-  let artistName = fallbackArtistName || "Unknown";
-  const artistRels = apiTrack.relationships?.artists?.data;
-  if (Array.isArray(artistRels) && artistRels.length > 0 && artistRels[0].name) {
-    artistName = artistRels[0].name;
-  }
-
-  // Try to get album from relationships
-  let albumName = "Unknown";
-  const albumRels = apiTrack.relationships?.albums?.data;
-  if (Array.isArray(albumRels) && albumRels.length > 0) {
-    albumName = albumRels[0].attributes?.title || "Unknown";
-  }
-
-  // Parse release date from createdAt
-  let releaseYear: number | null = null;
-  if (attrs.createdAt) {
-    releaseYear = new Date(attrs.createdAt).getFullYear();
-  }
-
-  // Build title with version if present
-  const title = attrs.version
-    ? `${attrs.title} (${attrs.version})`
-    : attrs.title || "Unknown";
-
-  return {
-    id: parseInt(apiTrack.id, 10),
-    title,
-    artist: artistName,
-    album: albumName,
-    duration: parseDuration(attrs.duration),
-    release_year: releaseYear,
-    audio_features: {
-      bpm: null, // Not available in official API v2
-      key: null, // Not available in official API v2
-    },
-  };
+  const client = getClient();
+  return fetchTrackById(client, String(trackId));
 }
