@@ -28,9 +28,13 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@tidal-music/api": "^0.7.0",
+    "@tidal-music/auth": "^1.4.0",
+    "@tidal-music/common": "^0.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.6.2",
     "commander": "^14.0.3",
+    "open": "^11.0.0",
     "yaml": "^2.8.2"
   }
 }

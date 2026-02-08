@@ -29,6 +29,7 @@ node dist/cli.js discover --genre "soul" --tags "classic" --limit 20 --format js
 | `sync --source tidal` | Sync favorites with audio features |
 | `search --favorited` | Query synced favorites |
 | `export --format tidal` | Output track IDs |
+| `auth login/status` | OAuth login + status for official SDK |
 
 ### 🚧 Next Task: Migrate to Official TIDAL SDK
 
@@ -52,12 +53,15 @@ curator/
 │   ├── cli.ts                 # Entry point
 │   ├── commands/              # CLI commands
 │   │   ├── discover.ts        # Track discovery
+│   │   ├── auth.ts            # OAuth login/status
 │   │   ├── arrange.ts         # BPM-based arrangement
 │   │   ├── export.ts          # Output formatting
 │   │   ├── sync.ts            # Tidal sync
 │   │   └── search.ts          # Local search
 │   ├── services/
-│   │   └── tidalDirect.ts     # ⚠️ TO BE REPLACED with SDK
+│   │   ├── tidalDirect.ts     # ⚠️ Legacy helper (to be removed)
+│   │   ├── tidalSdk.ts        # Official SDK integration (OAuth)
+│   │   └── nodeStorage.ts     # localStorage polyfill for SDK
 │   ├── providers/
 │   │   └── musicbrainz.ts     # Label/artist lookup
 │   └── db/                    # SQLite storage
@@ -71,8 +75,11 @@ curator/
 
 Default paths (can be overridden via env vars):
 - **Database:** `~/clawd/projects/curator/data/curator.db`
-- **Tidal Session:** `~/clawd/projects/tidal-service/tidal_session.json`
-- **Python:** `~/clawd/projects/tidal-service/.venv/bin/python`
+- **Tidal Session:** `~/clawd/projects/tidal-service/tidal_session.json` (legacy)
+- **Python:** `~/clawd/projects/tidal-service/.venv/bin/python` (legacy)
+
+OAuth credentials (required for official SDK):
+- **Credentials:** `~/.config/curator/credentials.json`
 
 ## Development
 

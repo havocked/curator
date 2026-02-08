@@ -3,11 +3,10 @@ import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import {
   fetchPlaylistTracksDirect,
-  fetchArtistTopTracksDirect,
   searchPlaylistsDirect,
-  searchArtistsDirect,
 } from "../services/tidalDirect";
 import { getLabelArtists, searchLabel } from "../providers/musicbrainz";
+import { getArtistTopTracks, initTidalClient, searchArtists } from "../services/tidalSdk";
 import type { TidalTrack } from "../services/tidalService";
 
 type DiscoverOptions = {
@@ -119,23 +118,23 @@ export function dedupeTracks(tracks: TidalTrack[]): TidalTrack[] {
   return unique;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function discoverByArtists(
   names: string[],
-  limitPerArtist: number,
-  sessionPath: string,
-  pythonPath: string
+  limitPerArtist: number
 ): Promise<TidalTrack[]> {
   const collected: TidalTrack[] = [];
 
   for (const name of names) {
-    const artists = await searchArtistsDirect({
-      sessionPath,
-      pythonPath,
-      query: name,
-      artistLimit: 1,
-    });
+    console.error(`[discover] Searching for artist: ${name}`);
+    const artists = await searchArtists(name, 1);
+    console.error(`[discover] Found ${artists.length} artists`);
 
     if (artists.length === 0) {
+      console.error(`[discover] No artists found for: ${name}`);
       continue;
     }
 
@@ -143,12 +142,11 @@ async function discoverByArtists(
     if (!artist) {
       continue;
     }
-    const tracks = await fetchArtistTopTracksDirect({
-      sessionPath,
-      pythonPath,
-      artistId: artist.id,
-      limit: limitPerArtist,
-    });
+    console.error(`[discover] Getting tracks for artist: ${artist.name} (ID: ${artist.id})`);
+    // Small delay to avoid rate limiting after search requests
+    await wait(300);
+    const tracks = await getArtistTopTracks(artist.id, limitPerArtist, artist.name);
+    console.error(`[discover] Got ${tracks.length} tracks`);
     collected.push(...tracks);
   }
 
@@ -267,6 +265,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   let tracks: TidalTrack[] = [];
 
   if (options.label) {
+    await initTidalClient();
     labelName = options.label.trim();
     if (!labelName) {
       throw new Error("Provide a label name.");
@@ -281,29 +280,20 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     }
     artistNames = names;
     const limitPerArtist = normalizeLimitPerArtist(options.limitPerArtist);
-    tracks = await discoverByArtists(
-      artistNames,
-      limitPerArtist,
-      sessionPath,
-      pythonPath
-    );
+    tracks = await discoverByArtists(artistNames, limitPerArtist);
     if (tracks.length === 0) {
       throw new Error("No tracks found for label artists.");
     }
     tracks = tracks.slice(0, limit);
   } else if (options.artists) {
+    await initTidalClient();
     artistNames = parseArtists(options.artists);
     if (artistNames.length === 0) {
       throw new Error("Provide at least one artist name.");
     }
 
     const limitPerArtist = normalizeLimitPerArtist(options.limitPerArtist);
-    tracks = await discoverByArtists(
-      artistNames,
-      limitPerArtist,
-      sessionPath,
-      pythonPath
-    );
+    tracks = await discoverByArtists(artistNames, limitPerArtist);
     if (tracks.length === 0) {
       throw new Error("No tracks found for the provided artists.");
     }
