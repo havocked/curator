@@ -9,7 +9,7 @@ import {
   searchArtists,
   searchTracks,
 } from "../services/tidalSdk";
-import type { TidalTrack } from "../services/tidalService";
+import type { Track } from "../services/types";
 
 type DiscoverOptions = {
   playlist?: string;
@@ -96,9 +96,9 @@ export function buildSearchQuery(
   return parts.join(" ");
 }
 
-export function dedupeTracks(tracks: TidalTrack[]): TidalTrack[] {
+export function dedupeTracks(tracks: Track[]): Track[] {
   const seen = new Set<number>();
-  const unique: TidalTrack[] = [];
+  const unique: Track[] = [];
   for (const track of tracks) {
     if (seen.has(track.id)) continue;
     seen.add(track.id);
@@ -114,8 +114,8 @@ function wait(ms: number): Promise<void> {
 async function discoverByArtists(
   names: string[],
   limitPerArtist: number
-): Promise<TidalTrack[]> {
-  const collected: TidalTrack[] = [];
+): Promise<Track[]> {
+  const collected: Track[] = [];
 
   for (const name of names) {
     console.error(`[discover] Searching for artist: ${name}`);
@@ -148,7 +148,7 @@ function formatLabel(value: string | null | undefined): string {
   return trimmed.length > 0 ? trimmed : "Unknown";
 }
 
-function formatTrackList(tracks: TidalTrack[]): string[] {
+function formatTrackList(tracks: Track[]): string[] {
   return tracks.map((track, index) => {
     const artist = formatLabel(track.artist);
     const album = track.album ? track.album : "Unknown";
@@ -172,7 +172,7 @@ function formatTrackList(tracks: TidalTrack[]): string[] {
   });
 }
 
-export function formatDiscoverAsText(sourceLabel: string, tracks: TidalTrack[]): string {
+export function formatDiscoverAsText(sourceLabel: string, tracks: Track[]): string {
   if (tracks.length === 0) {
     return `Discovered 0 tracks from source ${sourceLabel}.`;
   }
@@ -185,7 +185,7 @@ export function formatDiscoverAsText(sourceLabel: string, tracks: TidalTrack[]):
 
 export function formatDiscoverAsJson(
   query: DiscoverQuery,
-  tracks: TidalTrack[],
+  tracks: Track[],
   limit: number
 ): string {
   const source = query.label
@@ -228,7 +228,7 @@ export function formatDiscoverAsJson(
   return JSON.stringify(output, null, 2);
 }
 
-export function formatDiscoverAsIds(tracks: TidalTrack[]): string {
+export function formatDiscoverAsIds(tracks: Track[]): string {
   return tracks.map((track) => String(track.id)).join("\n");
 }
 
@@ -249,7 +249,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   let playlistId: string | undefined;
   let artistNames: string[] | undefined;
   let labelName: string | undefined;
-  let tracks: TidalTrack[] = [];
+  let tracks: Track[] = [];
 
   if (options.label) {
     await initTidalClient();

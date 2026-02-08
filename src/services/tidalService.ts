@@ -1,37 +1,56 @@
-export type TidalAudioFeatures = {
-  bpm?: number | null;
-  key?: string | null;
-  key_scale?: string | null;
-  peak?: number | null;
-};
+import type { Track } from "./types";
 
-export type TidalTrack = {
+// --- HTTP Service Response Types (raw shapes from tidal-service) ---
+
+interface ServiceTrack {
   id: number;
   title: string;
   artist: string;
   album: string;
   duration: number;
   album_art?: string | null;
-  audio_features?: TidalAudioFeatures;
+  audio_features?: {
+    bpm?: number | null;
+    key?: string | null;
+    key_scale?: string | null;
+    peak?: number | null;
+  };
   release_year?: number | null;
-  popularity?: number | null;
-  genres?: string[];
-  mood?: string[];
-};
+}
 
 export type FavoritesResponse = {
   tracks_count: number;
   albums_count: number;
   artists_count: number;
   favorites: {
-    tracks: TidalTrack[];
+    tracks: Track[];
     albums: Array<Record<string, unknown>>;
     artists: Array<Record<string, unknown>>;
   };
 };
 
+// --- Helpers ---
+
 export function normalizeBaseUrl(input: string): string {
   return input.replace(/\/+$/, "");
+}
+
+function serviceTrackToTrack(raw: ServiceTrack): Track {
+  return {
+    id: raw.id,
+    title: raw.title,
+    artist: raw.artist,
+    album: raw.album,
+    duration: raw.duration,
+    release_year: raw.release_year ?? null,
+    popularity: null,
+    genres: [],
+    mood: [],
+    audio_features: {
+      bpm: raw.audio_features?.bpm ?? null,
+      key: raw.audio_features?.key ?? null,
+    },
+  };
 }
 
 export function normalizeFavoritesResponse(payload: unknown): FavoritesResponse {
@@ -40,25 +59,31 @@ export function normalizeFavoritesResponse(payload: unknown): FavoritesResponse 
     albums_count?: number;
     artists_count?: number;
     favorites?: {
-      tracks?: TidalTrack[];
+      tracks?: ServiceTrack[];
       albums?: Array<Record<string, unknown>>;
       artists?: Array<Record<string, unknown>>;
     };
   };
 
   const favorites = raw.favorites ?? {};
-  const tracks = Array.isArray(favorites.tracks) ? favorites.tracks : [];
+  const rawTracks = Array.isArray(favorites.tracks) ? favorites.tracks : [];
   const albums = Array.isArray(favorites.albums) ? favorites.albums : [];
   const artists = Array.isArray(favorites.artists) ? favorites.artists : [];
 
   return {
-    tracks_count: typeof raw.tracks_count === "number" ? raw.tracks_count : tracks.length,
+    tracks_count: typeof raw.tracks_count === "number" ? raw.tracks_count : rawTracks.length,
     albums_count: typeof raw.albums_count === "number" ? raw.albums_count : albums.length,
     artists_count:
       typeof raw.artists_count === "number" ? raw.artists_count : artists.length,
-    favorites: { tracks, albums, artists },
+    favorites: {
+      tracks: rawTracks.map(serviceTrackToTrack),
+      albums,
+      artists,
+    },
   };
 }
+
+// --- HTTP Client ---
 
 export class TidalServiceClient {
   private readonly baseUrl: string;

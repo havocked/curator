@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { schemaStatements } from "./schema";
-import type { TidalTrack } from "../services/tidalService";
+import type { Track } from "../services/types";
 
 export type SyncFavoritesResult = {
   upsertedTracks: number;
@@ -43,7 +43,7 @@ export function applySchema(db: Database.Database): void {
 
 export function syncFavoriteTracks(
   db: Database.Database,
-  tracks: TidalTrack[]
+  tracks: Track[]
 ): SyncFavoritesResult {
   const insertTrack = db.prepare(`
     INSERT INTO tracks (
@@ -103,7 +103,7 @@ export function syncFavoriteTracks(
   let favoriteSignals = 0;
   let audioFeatures = 0;
 
-  const transaction = db.transaction((items: TidalTrack[]) => {
+  const transaction = db.transaction((items: Track[]) => {
     clearExisting.run();
     for (const track of items) {
       insertTrack.run({
@@ -148,7 +148,7 @@ export function syncFavoriteTracks(
 
 export function upsertDiscoveredTracks(
   db: Database.Database,
-  tracks: TidalTrack[],
+  tracks: Track[],
   discoveredVia: string
 ): DiscoverResult {
   const insertTrack = db.prepare(`
@@ -213,7 +213,7 @@ export function upsertDiscoveredTracks(
   let audioFeatures = 0;
   let metadataRows = 0;
 
-  const transaction = db.transaction((items: TidalTrack[]) => {
+  const transaction = db.transaction((items: Track[]) => {
     for (const track of items) {
       insertTrack.run({
         tidal_id: track.id,

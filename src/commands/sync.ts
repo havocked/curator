@@ -3,6 +3,7 @@ import { loadConfig } from "../lib/config";
 import { TidalServiceClient } from "../services/tidalService";
 import { applySchema, openDatabase, syncFavoriteTracks } from "../db";
 import { getFavoriteTracks, initTidalClient } from "../services/tidalSdk";
+import type { Track } from "../services/types";
 
 type SyncOptions = {
   source?: string;
@@ -53,7 +54,7 @@ export async function runSync(options: SyncOptions): Promise<void> {
   const config = loadConfig();
   const via = normalizeVia(options.via);
 
-  let favoriteTracks: import("../services/tidalService").TidalTrack[];
+  let favoriteTracks: Track[];
 
   if (via === "service") {
     const svc = new TidalServiceClient(
