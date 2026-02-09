@@ -76,9 +76,56 @@
 4. **No remaster deduplication** — same song appears from different reissues
 5. **Conceptual queries untranslatable** — "best album openers", "songs that sample X" need external knowledge
 
+## Unlocked Endpoints (Feb 9, 2026 — iOS SDK Analysis)
+
+Analyzed `tidal-music/tidal-sdk-ios` repo. Cross-referenced `required-access-tier` in OpenAPI spec.
+All endpoints below are `THIRD_PARTY` (available with our credentials).
+
+### ✅ Confirmed Working
+| Endpoint | Returns | Quality |
+|----------|---------|---------|
+| `/tracks/{id}/relationships/similarTracks` | 20 similar track IDs | **Excellent** — "Get Lucky" → Stardust, Modjo, Eric Prydz |
+| `/tracks/{id}/relationships/radio` | Playlist ID (resolve via `/playlists/{id}/relationships/items`) | **Excellent** — same quality as similarTracks |
+| `/searchResults/{id}/relationships/topHits` | Mixed types: artists + tracks + albums | **Good** — smarter than tracks-only search |
+| `/searchSuggestions/{id}` | Autocomplete suggestions | Useful for query refinement |
+| `/albums/{id}/relationships/similarAlbums` | Album IDs | Untested quality (test ID was wrong) |
+| `/artists/{id}/relationships/similarArtists` | 20 artist IDs | **Broken** — returns hip hop for Daft Punk, likely personalized/buggy |
+| `/artists/{id}/relationships/radio` | Playlist ID | **Broken** — same issue, wrong genre results |
+
+### ❌ Confirmed Blocked (INTERNAL only)
+| Endpoint | Result |
+|----------|--------|
+| `GET /genres` | Requires `filter[id]`, returns empty for `USER_SELECTABLE` |
+| `GET /genres/{id}` | Would work if we knew IDs, but can't list them |
+| `/tracks/{id}/relationships/genres` | Returns empty `data: []` |
+| `/albums/{id}/relationships/genres` | Returns empty `data: []` |
+
+### ❌ Empty (Account/Subscription Issue)
+| Endpoint | Result |
+|----------|--------|
+| `/userRecommendations/{id}` | `NOT_FOUND` |
+| `/userRecommendations/{id}/relationships/discoveryMixes` | Empty |
+| `/userRecommendations/{id}/relationships/myMixes` | Empty |
+
+### Key Insight
+**`similarTracks` + `trackRadio` are the game changers.** Feed a seed track → get 20 quality recommendations.
+Can chain: seed → similar → pick best → similar again → deduplicate → playlist.
+This is Tidal's own recommendation engine exposed via API.
+
+**Genre endpoint is truly locked.** iOS SDK has the code because Tidal's own app uses an internal client ID. Third-party credentials get empty responses.
+
+### Reference
+- iOS SDK repo: `github.com/tidal-music/tidal-sdk-ios`
+- OpenAPI spec (iOS): `Sources/TidalAPI/Config/input/tidal-api-oas.json` (155 endpoints, no access tier markings)
+- Our spec: `references/tidal-openapi.json` (167 endpoints, 92 THIRD_PARTY / 138 INTERNAL)
+- Rate limit: token bucket, ~500ms between requests is safe ([Discussion #135](https://github.com/orgs/tidal-music/discussions/135))
+- Rate limit is **per-client-ID**, not per-user. `Retry-After` header on 429s.
+
 ## Next Steps
 
 ### High Impact
+- [ ] **Integrate `similarTracks`** — `discover --similar <track-id>` or `--radio <track-id>` for recommendation-based discovery
+- [ ] **Integrate `topHits` search** — smarter mixed-type search (artists + tracks + albums in one query)
 - [ ] **Remaster deduplication** — fingerprint-based dedup (same title + same artist → keep one)
 - [ ] **`playlist create --interactive`** — preview/reject tracks before creating
 - [ ] **`--exclude-artists`** — blocklist specific artists from results
