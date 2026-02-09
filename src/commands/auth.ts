@@ -9,7 +9,7 @@ import { loadCredentials } from "../services/tidalSdk";
 const REDIRECT_URI = "http://localhost:8080/callback";
 const CREDENTIALS_STORAGE_KEY = "curator-tidal-auth";
 
-const AUTH_SCOPES = ["user.read", "collection.read", "playlists.read", "playlists.write"];
+const AUTH_SCOPES = ["user.read", "collection.read", "playlists.read", "playlists.write", "recommendations.read"];
 
 async function initAuth(): Promise<void> {
   const { clientId, clientSecret } = loadCredentials();

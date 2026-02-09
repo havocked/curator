@@ -60,7 +60,7 @@ export async function initTidalClient(): Promise<void> {
       clientId,
       clientSecret,
       credentialsStorageKey: CREDENTIALS_STORAGE_KEY,
-      scopes: ["user.read", "collection.read", "playlists.read", "playlists.write"],
+      scopes: ["user.read", "collection.read", "playlists.read", "playlists.write", "recommendations.read"],
     });
     initialized = true;
   }
