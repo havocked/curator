@@ -115,8 +115,8 @@ export function createEnrichmentCache(db: Database.Database): EnrichmentCache {
         .prepare(
           `SELECT
              COUNT(*) as total,
-             SUM(CASE WHEN found = 1 THEN 1 ELSE 0 END) as found,
-             SUM(CASE WHEN found = 0 THEN 1 ELSE 0 END) as not_found
+             COALESCE(SUM(CASE WHEN found = 1 THEN 1 ELSE 0 END), 0) as found,
+             COALESCE(SUM(CASE WHEN found = 0 THEN 1 ELSE 0 END), 0) as not_found
            FROM enrichment_artists`
         )
         .get() as { total: number; found: number; not_found: number };
