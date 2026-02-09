@@ -2,7 +2,9 @@ import { log } from "../lib/logger";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import { initTidalClient } from "../services/tidalSdk";
-import { filterTracks, hasActiveFilters } from "./filters";
+import { filterTracks, filterByGenre, hasActiveFilters } from "./filters";
+import { createEnrichmentCache, enrichTracks } from "../enrichment/index";
+import { createMusicBrainzClient } from "../providers/musicbrainz";
 import {
   formatAsIds,
   formatAsJson,
@@ -36,6 +38,9 @@ export interface DiscoverOptions {
   popularityMax?: number;
   yearMin?: number;
   yearMax?: number;
+  enrich?: boolean;
+  genreFilter?: string;
+  refreshCache?: boolean;
 }
 
 // --- Input Parsing ---
@@ -180,12 +185,56 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     );
   }
 
-  // 3. Apply limit
+  // 3. Enrich tracks (opt-in)
+  if (options.enrich) {
+    const db = openDatabase(config.database.path);
+    try {
+      applySchema(db);
+      const cache = createEnrichmentCache(db);
+      const mbClient = createMusicBrainzClient();
+
+      const cacheStats = cache.stats();
+      log(`[enrich] Cache: ${cacheStats.found} artists cached, ${cacheStats.notFound} not-found`);
+
+      const { tracks: enriched, stats } = await enrichTracks(result.tracks, {
+        cache,
+        mbClient,
+        onProgress: (done, total, artist) => {
+          process.stderr.write(`\r[enrich] ${done}/${total} artists — ${artist}   `);
+        },
+      });
+      result.tracks = enriched;
+
+      if (stats.cacheMisses > 0) {
+        process.stderr.write("\n");
+      }
+      log(
+        `[enrich] Done: ${stats.uniqueArtists} artists (${stats.cacheHits} cached, ${stats.apiCalls} API calls, ${stats.notFound} not found)`
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  // 4. Genre filter (requires --enrich)
+  if (options.genreFilter) {
+    if (!options.enrich) {
+      console.error("Error: --genre-filter requires --enrich flag");
+      process.exit(1);
+    }
+    const beforeCount = result.tracks.length;
+    result.tracks = filterByGenre(result.tracks, options.genreFilter);
+    log(
+      `[discover] Genre filter "${options.genreFilter}": ${beforeCount} → ${result.tracks.length} tracks`
+    );
+  }
+
+  // 5. Apply limit
   result.tracks = result.tracks.slice(0, limit);
 
-  // 4. Persist to database
+  // 6. Persist to database
   persistTracks(result, config.database.path);
 
-  // 5. Output
+  // 7. Output
   outputResult(format, options, result, limit);
 }

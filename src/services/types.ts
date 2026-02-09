@@ -1,3 +1,12 @@
+export interface EnrichmentMetadata {
+  artist_mbid?: string;
+  artist_genres?: string[];
+  artist_genre_votes?: number[];
+  // Future: Last.fm moods, GetSongBPM data
+  enriched_at?: string;
+  enrichment_sources?: string[];
+}
+
 export interface Track {
   id: number;
   title: string;
@@ -12,6 +21,7 @@ export interface Track {
     bpm: number | null;
     key: string | null;
   };
+  enrichment?: EnrichmentMetadata;
 }
 
 export interface Artist {

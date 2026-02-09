@@ -37,3 +37,24 @@ export function filterTracks(tracks: Track[], filters: TrackFilters): Track[] {
 export function hasActiveFilters(filters: TrackFilters): boolean {
   return Object.values(filters).some((v) => v != null);
 }
+
+/**
+ * Filter tracks by enriched MusicBrainz genre.
+ * Case-insensitive partial match (e.g. "house" matches "deep house").
+ */
+export function filterByGenre(tracks: Track[], genre: string): Track[] {
+  const genreLower = genre.toLowerCase();
+  return tracks.filter((track) => {
+    // Check enrichment genres first
+    if (track.enrichment?.artist_genres) {
+      return track.enrichment.artist_genres.some((g) =>
+        g.toLowerCase().includes(genreLower)
+      );
+    }
+    // Fallback: check Tidal genres (usually empty, but future-proof)
+    if (track.genres.length > 0) {
+      return track.genres.some((g) => g.toLowerCase().includes(genreLower));
+    }
+    return false;
+  });
+}
