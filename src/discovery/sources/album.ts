@@ -1,3 +1,4 @@
+import { log } from "../../lib/logger";
 import {
   getAlbumTracks,
   getArtistAlbums,
@@ -9,9 +10,9 @@ export async function discoverFromAlbum(
   albumId: string,
   ctx: DiscoveryContext
 ): Promise<DiscoveryResult> {
-  console.error(`[discover] Fetching album tracks: ${albumId}`);
+  log(`[discover] Fetching album tracks: ${albumId}`);
   const tracks = await getAlbumTracks(albumId, ctx.limit);
-  console.error(`[discover] Got ${tracks.length} tracks`);
+  log(`[discover] Got ${tracks.length} tracks`);
   if (tracks.length === 0) {
     throw new Error(`No tracks found for album: ${albumId}`);
   }
@@ -27,23 +28,23 @@ export async function discoverFromLatestAlbum(
   artistName: string,
   ctx: DiscoveryContext
 ): Promise<DiscoveryResult> {
-  console.error(`[discover] Searching for artist: ${artistName}`);
+  log(`[discover] Searching for artist: ${artistName}`);
   const artist = await searchArtists(artistName);
   if (!artist) {
     throw new Error(`Artist not found: ${artistName}`);
   }
-  console.error(`[discover] Found: ${artist.name} (ID: ${artist.id})`);
-  console.error(`[discover] Fetching discography...`);
+  log(`[discover] Found: ${artist.name} (ID: ${artist.id})`);
+  log(`[discover] Fetching discography...`);
   const albums = await getArtistAlbums(artist.id);
   if (albums.length === 0) {
     throw new Error(`No albums found for: ${artist.name}`);
   }
   const latest = albums[0]!;
-  console.error(
+  log(
     `[discover] Latest album: ${latest.title} (${latest.releaseYear ?? "?"}) — ${latest.trackCount ?? "?"} tracks`
   );
   const tracks = await getAlbumTracks(latest.id, ctx.limit);
-  console.error(`[discover] Got ${tracks.length} tracks`);
+  log(`[discover] Got ${tracks.length} tracks`);
   if (tracks.length === 0) {
     throw new Error(`No tracks found for album: ${latest.title}`);
   }

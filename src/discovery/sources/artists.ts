@@ -1,3 +1,4 @@
+import { log } from "../../lib/logger";
 import { runConcurrent } from "../../lib/concurrent";
 import {
   getArtistTopTracks,
@@ -14,14 +15,14 @@ async function resolveArtistTracks(
   limitPerArtist: number
 ): Promise<Track[]> {
   // Step 1: Search all artists in parallel
-  console.error(`[discover] Searching ${names.length} artists...`);
+  log(`[discover] Searching ${names.length} artists...`);
   const searchResults = await runConcurrent(
     names.map((name) => async () => {
       const artist = await searchArtists(name);
       if (artist) {
-        console.error(`[discover] Found: ${name} (ID: ${artist.id})`);
+        log(`[discover] Found: ${name} (ID: ${artist.id})`);
       } else {
-        console.error(`[discover] No results for: ${name}`);
+        log(`[discover] No results for: ${name}`);
       }
       return artist;
     }),
@@ -35,11 +36,11 @@ async function resolveArtistTracks(
   if (artists.length === 0) return [];
 
   // Step 2: Get top tracks for all artists in parallel
-  console.error(`[discover] Getting tracks for ${artists.length} artists...`);
+  log(`[discover] Getting tracks for ${artists.length} artists...`);
   const trackGroups = await runConcurrent(
     artists.map((artist) => async () => {
       const tracks = await getArtistTopTracks(artist.id, limitPerArtist);
-      console.error(`[discover] ${artist.name}: ${tracks.length} tracks`);
+      log(`[discover] ${artist.name}: ${tracks.length} tracks`);
       return tracks;
     }),
     ARTIST_CONCURRENCY

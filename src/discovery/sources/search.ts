@@ -1,3 +1,4 @@
+import { log } from "../../lib/logger";
 import { searchTracks } from "../../services/tidalSdk";
 import type { DiscoveryContext, DiscoveryResult } from "../types";
 
@@ -30,9 +31,9 @@ export async function discoverFromSearch(
       "Provide --playlist, --album, --artists, --label, or --genre/--tags to discover tracks."
     );
   }
-  console.error(`[discover] Searching tracks: ${query}`);
+  log(`[discover] Searching tracks: ${query}`);
   const tracks = await searchTracks(query, ctx.limit);
-  console.error(`[discover] Found ${tracks.length} tracks`);
+  log(`[discover] Found ${tracks.length} tracks`);
   if (tracks.length === 0) {
     throw new Error("No tracks found for the provided genre/tags.");
   }

@@ -1,3 +1,4 @@
+import { log } from "../../lib/logger";
 import { getSimilarTracks } from "../../services/tidalSdk";
 import type { DiscoveryContext, DiscoveryResult } from "../types";
 
@@ -5,9 +6,9 @@ export async function discoverFromSimilar(
   trackId: string,
   ctx: DiscoveryContext
 ): Promise<DiscoveryResult> {
-  console.error(`[discover] Finding tracks similar to: ${trackId}`);
+  log(`[discover] Finding tracks similar to: ${trackId}`);
   const tracks = await getSimilarTracks(trackId, ctx.limit);
-  console.error(`[discover] Got ${tracks.length} similar tracks`);
+  log(`[discover] Got ${tracks.length} similar tracks`);
   if (tracks.length === 0) {
     throw new Error(`No similar tracks found for track: ${trackId}`);
   }

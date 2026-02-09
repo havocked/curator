@@ -1,3 +1,4 @@
+import { log } from "../lib/logger";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import { initTidalClient } from "../services/tidalSdk";
@@ -174,7 +175,7 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   if (hasActiveFilters(filters)) {
     const beforeCount = result.tracks.length;
     result.tracks = filterTracks(result.tracks, filters);
-    console.error(
+    log(
       `[discover] Filtered ${beforeCount} → ${result.tracks.length} tracks`
     );
   }
