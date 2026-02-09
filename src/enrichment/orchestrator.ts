@@ -4,6 +4,40 @@ import type { ArtistMatch, ArtistGenres } from "../providers/musicbrainz.js";
 import { normalizeArtistName } from "../lib/artist.js";
 import { log } from "../lib/logger.js";
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry an async function with exponential backoff.
+ * Only retries on transient errors (network, rate limit).
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  label: string
+): Promise<T> {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isLast = attempt === MAX_RETRIES;
+      const msg = err instanceof Error ? err.message : String(err);
+
+      if (isLast) {
+        throw err;
+      }
+
+      const delayMs = RETRY_DELAY_MS * Math.pow(2, attempt);
+      log(`[enrich] ${label} failed (${msg}), retrying in ${delayMs / 1000}s...`);
+      await sleep(delayMs);
+    }
+  }
+  throw new Error("Unreachable");
+}
+
 export type EnrichmentStats = {
   tracks: number;
   uniqueArtists: number;
@@ -75,7 +109,10 @@ export async function enrichTracks(
 
     try {
       stats.apiCalls++;
-      const match = await mbClient.searchArtist(name);
+      const match = await withRetry(
+        () => mbClient.searchArtist(name),
+        `search "${name}"`
+      );
 
       if (!match) {
         cache.setArtistNotFound(name);
@@ -85,7 +122,10 @@ export async function enrichTracks(
       }
 
       stats.apiCalls++;
-      const genres = await mbClient.getArtistGenres(match.mbid);
+      const genres = await withRetry(
+        () => mbClient.getArtistGenres(match.mbid),
+        `genres "${name}"`
+      );
 
       const data: CachedArtist = {
         mbid: genres.mbid,
@@ -96,8 +136,8 @@ export async function enrichTracks(
       artistMap.set(name, data);
     } catch (err) {
       stats.errors++;
-      log(`[enrich] Failed for "${name}": ${err instanceof Error ? err.message : err}`);
-      // Don't cache errors — transient failures should be retried
+      log(`[enrich] Failed for "${name}" after retries: ${err instanceof Error ? err.message : err}`);
+      // Don't cache errors — transient failures should be retried next run
     }
   }
 
