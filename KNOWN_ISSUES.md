@@ -32,13 +32,13 @@ curator discover --artists "Justice,Mr. Oizo,Busy P,SebastiAn" --limit-per-artis
 
 ### 3. Genre Search Is Keyword-Based, Not Genre-Aware
 
-**Severity:** Medium
+**Severity:** Medium (mitigated)
 
 `--genre "classical"` searches for the word "classical" in track/album/artist metadata — it doesn't filter by actual music genre. Results can include unrelated tracks (e.g., Vampire Weekend's "Classical", Gucci Mane "Classical Intro").
 
-**Workaround:** Use more specific terms (`"beethoven sonata"` instead of `"classical"`) or use `--artists` for precise results.
+**Mitigation:** Use `--genre-filter` with enrichment (default on) to filter by real MusicBrainz genres after discovery. Example: `curator discover --genre "electronic" --genre-filter "house"`.
 
-**Root cause:** Tidal's genre taxonomy is internal-only. The search endpoint is all we have.
+**Root cause:** Tidal's genre taxonomy is internal-only. MusicBrainz enrichment fills the gap.
 
 ---
 
@@ -80,17 +80,17 @@ When fetching tracks from multiple artists, if some artists timeout or return fe
 
 Official API v2 has BPM and key in the type schema, but many tracks return null values from Tidal. This limits the effectiveness of `arrange --arc gentle_rise`.
 
-**No fix available** — depends on Tidal populating the data.
+**No fix available yet** — depends on Tidal populating the data. External BPM providers (GetSongBPM, etc.) are a potential future mitigation.
 
 ---
 
-### 8. Genres/Mood Tags Empty
+### 8. Tidal Genre/Mood Tags Empty
 
-**Severity:** Low (no functional impact)
+**Severity:** Low (mitigated)
 
-Track genres and mood (`toneTags`) fields are always empty. Genre-related API endpoints (`GET /genres`, etc.) are marked `INTERNAL` access tier — available to Tidal's own apps but not external developers.
+Tidal's native genre and mood (`toneTags`) fields are always empty. Genre-related API endpoints (`GET /genres`, etc.) are `INTERNAL` access tier.
 
-**Impact:** None for discovery — `--genre` uses keyword search which works. Fields kept in schema for future if Tidal opens access.
+**Mitigation:** MusicBrainz enrichment (default on) provides real artist genres. Use `--genre-filter` for genre-based filtering.
 
 ---
 

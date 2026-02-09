@@ -261,7 +261,7 @@ curator/
 │   └── db/
 │       ├── index.ts              # SQLite operations
 │       └── schema.ts             # Table definitions
-├── tests/                        # 85 unit tests
+├── tests/                        # Unit tests
 ├── data/
 │   └── curator.db                # Local track cache (SQLite)
 └── references/
@@ -280,7 +280,6 @@ curator/
 
 - **[Tidal](https://tidal.com)** — Music catalog, streaming, and playlist management
 - **[MusicBrainz](https://musicbrainz.org)** — Open music encyclopedia for artist genres and label data
-- **[GetSongBPM](https://getsongbpm.com)** — Song tempo (BPM) and key database
 
 ## Known Limitations
 
@@ -297,7 +296,7 @@ See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 ```bash
 npm install
 npm run build
-npm test           # 85 tests
+npm test
 
 node dist/cli.js discover --help
 node dist/cli.js arrange --help
