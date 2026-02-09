@@ -53,9 +53,15 @@ export function createMusicBrainzClient(options: MusicBrainzClientOptions = {}) 
     lastRequestTime = Date.now();
 
     const url = `${MB_BASE_URL}${path}`;
-    const response = await fetchFn(url, { headers: { "User-Agent": userAgent } });
+    let response: { ok: boolean; status: number; json: () => Promise<unknown> };
+    try {
+      response = await fetchFn(url, { headers: { "User-Agent": userAgent } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`MusicBrainz network error: ${msg} (${url})`);
+    }
     if (!response.ok) {
-      throw new Error(`MusicBrainz API error: ${response.status}`);
+      throw new Error(`MusicBrainz API ${response.status} (${path})`);
     }
     return response.json();
   }
