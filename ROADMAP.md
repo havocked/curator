@@ -195,15 +195,214 @@ Our spec (v1.1.4) matches the latest canonical source — we're current.
 - [ ] **Smarter skill orchestration** — SKILL.md should teach the AI agent multi-step playlist strategies
 - [ ] **Tidal playlist mining** — search Tidal editorial playlists by concept, merge tracks for genre intelligence
 
-### Larger Features
+### High Impact — Audio Feature Enrichment (exploration phase)
+- [ ] **GetSongBPM + Last.fm enrichment pipeline** — Fill BPM/key gaps via GetSongBPM, add mood/flavor tags via Last.fm. Dev branch `feature/audio-enrichment`. See [Audio Feature & Mood Enrichment section](#audio-feature--mood-enrichment--external-sources) for full plan.
+- [ ] **`enrich` command** — Takes track list, enriches with external metadata, outputs augmented JSON
+- [ ] **`--mood` / `--vibe` filter** — Filter by Last.fm mood tags (requires enrichment above)
+- [ ] **Mood-aware arrangement** — `arrange --arc` using energy/mood curve, not just BPM
+
+### Medium-Large Features
 - [ ] **`--evolution decade`** — decade walker engine
-- [ ] **Genre enrichment via MusicBrainz** — artist-level tags (1 req/sec rate limit)
-- [ ] **`--genre-filter`** — filter by actual genre (needs MusicBrainz enrichment)
+- [ ] **MusicBrainz genre enrichment** — resolve artist → MBID → genres. Enables real genre filtering. Cache in SQLite. See [MusicBrainz section](#musicbrainz--external-metadata-source) for full API reference.
+- [ ] **`--genre-filter`** — filter tracks by actual genre (requires MusicBrainz enrichment above)
+- [ ] **Remaster dedup via MusicBrainz release-groups** — same release-group MBID = same album → keep best version
 
 ### Won't Fix (API Limitations)
-- Per-track genre/mood data (Tidal INTERNAL-only)
+- Per-track genre/mood from Tidal (INTERNAL-only) — **mitigated** via Last.fm tags + MusicBrainz genres
+- BPM/key gaps from Tidal — **mitigated** via GetSongBPM lookup
 - Artist top tracks > 20 (API hard limit)
-- Structured genre taxonomy (no external endpoint)
+- Local audio analysis (out of scope — curator is metadata-driven)
+
+## Audio Feature & Mood Enrichment — External Sources
+
+Tidal's BPM/key data is sparse (many nulls) and mood data (`toneTags`) is completely broken. We solve this with a **layered lookup strategy** using external APIs — no audio analysis.
+
+### The Problem
+| Feature | Tidal Status | Impact |
+|---------|-------------|--------|
+| **BPM** | Sparse — many tracks return null | `arrange --arc gentle_rise` can't sort tracks without BPM; they get dumped at the end |
+| **Key** | Sparse — same as BPM | `--by key` barely functional |
+| **Mood/energy** | `toneTags` returns undefined on ALL tracks | No "flavor" data — can't filter or arrange by vibe |
+
+### Enrichment Strategy (layered, no audio analysis)
+
+```
+1. Tidal native        → use when available (free, already fetched)
+      ↓ miss
+2. GetSongBPM API      → BPM + key lookup by artist + title
+      ↓ miss
+3. Last.fm tags        → mood/flavor/energy tags per track and artist
+      ↓ miss
+4. Graceful fallback   → track gets no features, arrange skips it
+```
+
+### Source 1: GetSongBPM (getsongbpm.com)
+
+**What it gives:** BPM and musical key per track
+**Auth:** Free API key (request at getsongbpm.com/api)
+**Rate Limit:** TBD (document during exploration)
+**Lookup:** By song title + artist name
+
+**Key endpoints:**
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /search/?api_key=KEY&type=song&lookup=song+title+artist` | Search for track → get ID |
+| `GET /song/?api_key=KEY&id=SONG_ID` | Get BPM + key for track |
+| `GET /search/?api_key=KEY&type=artist&lookup=artist+name` | Search artist → get all songs with BPM |
+
+**Integration plan:**
+- Match Tidal track → GetSongBPM via `artist + title` fuzzy match
+- Fill `audio_features.bpm` and `audio_features.key` when Tidal returns null
+- Cache results in SQLite to avoid repeat lookups
+
+**Reference:**
+- API docs: https://getsongbpm.com/api
+- Sister site for key: https://getsongkey.com/api
+
+### Source 2: Last.fm (last.fm/api)
+
+**What it gives:** Community-curated tags per track and artist — includes mood, energy, genre, and vibe descriptors
+**Auth:** Free API key (register at last.fm/api/account/create)
+**Rate Limit:** 5 requests/second
+**Lookup:** By artist + track name (no ID cross-reference needed)
+
+**Key endpoints:**
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /?method=track.getTopTags&artist=X&track=Y&api_key=KEY&format=json` | Tags for a specific track (e.g., `chill`, `energetic`, `melancholic`, `groovy`) |
+| `GET /?method=artist.getTopTags&artist=X&api_key=KEY&format=json` | Tags for an artist (genre + mood, used as fallback) |
+| `GET /?method=track.getInfo&artist=X&track=Y&api_key=KEY&format=json` | Track metadata + listener count |
+| `GET /?method=tag.getTopTracks&tag=X&api_key=KEY&format=json` | Discover tracks by tag (e.g., all "chill" tracks) |
+
+**Tag examples (mood/flavor):**
+`chill`, `upbeat`, `dark`, `melancholic`, `groovy`, `energetic`, `dreamy`, `aggressive`, `romantic`, `atmospheric`, `happy`, `sad`, `danceable`, `mellow`, `intense`
+
+**Integration plan:**
+- After discovery, enrich tracks with `track.getTopTags`
+- Filter tags to a curated mood vocabulary (ignore noise like "seen live", "favourites")
+- Attach to track as `mood[]` / `flavor[]` field
+- Enables future: `--mood chill`, `--vibe energetic`, mood-based arc arrangement
+- Artist-level tags as fallback when track-level tags are sparse
+- Cache in SQLite
+
+**Reference:**
+- API docs: https://www.last.fm/api
+- Tag method docs: https://www.last.fm/api/show/track.getTopTags
+
+### ❌ Ruled Out
+| Source | Reason |
+|--------|--------|
+| **Spotify audio features** | Deprecated Nov 2024. New apps get 403. |
+| **Essentia.js / local audio analysis** | Out of scope — curator is a metadata tool, not an audio processor |
+| **AcousticBrainz** | Shut down 2022. Static dump data only, no new tracks. |
+| **ReccoBeats** | Uses Spotify track IDs — cross-reference adds too much complexity |
+
+### Exploration Phase (dev branch)
+
+**Goal:** Prove the enrichment pipeline works end-to-end before integrating into main.
+
+**Branch:** `feature/audio-enrichment`
+
+**Steps:**
+1. Get API keys (GetSongBPM + Last.fm)
+2. Build `src/providers/getsongbpm.ts` — search + lookup, rate-limited client
+3. Build `src/providers/lastfm.ts` — track tags + artist tags, rate-limited client
+4. Create `enrich` command (or `--enrich` flag on discover):
+   - Take track list (from discover output)
+   - For each track missing BPM/key → try GetSongBPM
+   - For each track → get Last.fm tags → extract mood vocabulary
+   - Output enriched JSON
+5. Test with ~20 tracks across genres:
+   - How many BPM gaps does GetSongBPM fill?
+   - How useful are Last.fm mood tags? (signal vs noise ratio)
+   - How does `arrange --arc gentle_rise` improve with enriched BPM?
+6. Document results, decide if worth merging to main
+
+**Success criteria:**
+- GetSongBPM fills >50% of Tidal's BPM gaps
+- Last.fm tags provide meaningful mood signal for >60% of tracks
+- Enriched arrange output is noticeably better than current sparse-BPM output
+
+---
+
+## MusicBrainz — External Metadata Source
+
+**API Root:** `https://musicbrainz.org/ws/2/`
+**Auth:** None required (User-Agent identification only)
+**Rate Limit:** 1 request per second (our client uses 1100ms)
+**Format:** JSON via `?fmt=json`
+**Existing integration:** `src/providers/musicbrainz.ts` (label search + artist roster)
+
+### Why MusicBrainz Matters for Curator
+Tidal's genre/mood endpoints are INTERNAL-only. MusicBrainz is the largest open music metadata database and provides exactly what Tidal locks away: **genre tags on artists, recordings, and releases** — community-curated, free, and well-structured.
+
+### Available Resources (13 core entities)
+`area`, `artist`, `event`, `genre`, `instrument`, `label`, `place`, `recording`, `release`, `release-group`, `series`, `work`, `url`
+
+### Key Endpoints for Curator
+
+| Endpoint | Use Case | Example |
+|----------|----------|---------|
+| `GET /artist/<MBID>?inc=genres+tags` | **Genre enrichment** — get genre tags for any artist | Daft Punk → `electronic`, `french house`, `disco` |
+| `GET /recording/<MBID>?inc=genres+tags` | Track-level genre tags (sparser than artist) | Per-track genre when available |
+| `GET /release-group/<MBID>?inc=genres+tags` | Album-level genre tags | Year Zero → `industrial rock`, `concept album` |
+| `GET /genre/all?fmt=json` | Full genre taxonomy (paginated) | Build local genre list for validation/autocomplete |
+| `GET /genre/all?fmt=txt` | All genre names as newline-separated text | Quick genre list dump |
+| `GET /isrc/<ISRC>` | Cross-reference Tidal tracks → MusicBrainz recordings | Bridge between catalogs if Tidal provides ISRCs |
+| `GET /artist?query=<name>&fmt=json` | Search artist by name → get MBID | Needed to go from Tidal artist name → MB lookup |
+| `GET /recording?query=<title> AND arid:<MBID>` | Find recording by title + artist | Match Tidal track → MB recording for genre lookup |
+| `GET /release-group?artist=<MBID>` | Browse all release groups by artist | **Remaster dedup** — group releases under canonical release-group |
+
+### Genre System
+- Genres are a curated subset of user-submitted tags
+- `inc=genres` returns only official genre tags; `inc=tags` returns all tags (genres + freeform)
+- Both are community-curated with vote counts
+- Full genre list: https://musicbrainz.org/genres
+- Tags have `count` field (vote weight) — useful for confidence thresholding
+
+### Practical Integration Points
+
+**1. Genre Enrichment (High Value)**
+Artist discovery → resolve name to MBID → `GET /artist/<MBID>?inc=genres` → attach genre tags to tracks.
+Enables `--genre-filter electronic` that actually works (vs. Tidal's broken keyword search).
+
+**2. Remaster Deduplication (High Value)**
+Multiple Tidal releases of same album → lookup via MusicBrainz release-groups → same `release-group` MBID = same album → keep highest-quality/most-popular version.
+
+**3. Genre Taxonomy for Validation**
+`GET /genre/all?fmt=txt` → local cache of all valid genre names → autocomplete/validation for `--genre-filter`.
+
+**4. Recording-Level Cross-Reference**
+If Tidal exposes ISRCs: `GET /isrc/<ISRC>` → MusicBrainz recording → get tags, relationships, and canonical metadata.
+
+### Rate Limit Strategy
+- 1 req/sec hard limit (IP-based)
+- Our client already enforces 1100ms between requests
+- For batch operations (e.g., enriching 50 tracks): ~55 seconds per batch
+- **Cache aggressively** — artist genres rarely change, cache for days/weeks
+- Consider SQLite cache table: `mb_artist_genres(mbid, genres_json, fetched_at)`
+
+### Current State in Curator
+- `searchLabel(name)` — find label by name → returns MBID
+- `getLabelArtists(mbid)` — get artists on a label via `recording contract` relationships
+- Both already respect rate limiting
+
+### Expansion Plan
+1. `searchArtist(name)` → resolve Tidal artist name to MBID
+2. `getArtistGenres(mbid)` → `GET /artist/<MBID>?inc=genres&fmt=json` → genre list
+3. `getRecordingGenres(mbid)` → track-level genre tags (optional, sparser)
+4. `getAllGenres()` → full genre taxonomy for local cache
+5. `getReleaseGroup(mbid)` → canonical album grouping for remaster dedup
+6. Local SQLite cache layer to avoid redundant API calls
+
+### Reference
+- API docs: https://musicbrainz.org/doc/MusicBrainz_API
+- Search docs: https://musicbrainz.org/doc/MusicBrainz_API/Search
+- Examples: https://musicbrainz.org/doc/MusicBrainz_API/Examples
+- Genre list: https://musicbrainz.org/genres
+- Rate limiting: https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
+
+---
 
 ## Architecture
 
@@ -216,12 +415,21 @@ curator CLI (TypeScript)
   │   ├── --album             → getAlbumTracks (cursor paginated)
   │   ├── --latest-album      → getArtistAlbums + getAlbumTracks
   │   └── --genre/--tags      → searchTracks (catalog keyword search)
+  ├── enrich (planned)
+  │   ├── BPM + key           → Tidal native → GetSongBPM fallback
+  │   ├── mood/flavor         → Last.fm track.getTopTags
+  │   └── genre               → MusicBrainz artist genres
   ├── arrange       → local BPM logic (gentle_rise, flat sort)
   ├── playlist      → createPlaylist + addTracksToPlaylist
   ├── filter        → local SQLite (familiar/discovery)
   ├── search        → local SQLite (favorited tracks)
   ├── sync          → getFavoriteTracks (v2 userCollections)
   └── export        → stdout (track IDs)
+
+External providers:
+  ├── providers/musicbrainz.ts  → label search, artist roster (existing)
+  ├── providers/getsongbpm.ts   → BPM + key lookup (planned)
+  └── providers/lastfm.ts       → mood/flavor tags (planned)
 ```
 
 ## Key Technical Decisions
