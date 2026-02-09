@@ -117,9 +117,62 @@ This is Tidal's own recommendation engine exposed via API.
 ### Reference
 - iOS SDK repo: `github.com/tidal-music/tidal-sdk-ios`
 - OpenAPI spec (iOS): `Sources/TidalAPI/Config/input/tidal-api-oas.json` (155 endpoints, no access tier markings)
-- Our spec: `references/tidal-openapi.json` (167 endpoints, 92 THIRD_PARTY / 138 INTERNAL)
+- OpenAPI spec (Android): `tidalapi/bin/openapi_downloads/tidal-api-oas.json` (139 endpoints, v1.0.45)
+- OpenAPI spec (canonical source): `https://tidal-music.github.io/tidal-api-reference/tidal-api-oas.json`
+- Our spec: `references/tidal-openapi.json` (167 endpoints, v1.1.4, 92 THIRD_PARTY / 138 INTERNAL)
 - Rate limit: token bucket, ~500ms between requests is safe ([Discussion #135](https://github.com/orgs/tidal-music/discussions/135))
 - Rate limit is **per-client-ID**, not per-user. `Retry-After` header on 429s.
+
+## tidal-music GitHub Org — Full Analysis (Feb 9, 2026)
+
+### Repos Analyzed
+
+| Repo | What it is | Useful for curator? |
+|------|-----------|-------------------|
+| **tidal-sdk-web** | JS/TS SDK (our dependency) | ✅ Found missing scopes: `recommendations.read` |
+| **tidal-sdk-ios** | Swift SDK | ✅ Discovered available endpoints (similarTracks, radio, topHits) |
+| **tidal-sdk-android** | Kotlin SDK | Same spec as iOS but older (v1.0.45 vs v1.0.54) |
+| **tidal-algorithmic-mixes** | Tidal's actual recommendation pipeline (PySpark) | ✅ Algorithm insights: diversity sort, discovery mix logic |
+| **per-transformers** | Common PySpark transformers | ✅ DiversitySortTransformer algorithm (gap-based spacing) |
+| **tidal-sdk** | Meta docs, architecture overview | No direct use |
+| **embed-player** | Embeddable web player | No use |
+| **networktime** | SNTP client (TrueTime) | Already integrated |
+| **eslint-config-tidal** | Linting config | No use |
+| **openapi-generator** | Fork of openapi-generator | No use |
+| **discussions** | Community discussions | Rate limit info |
+
+### Key Findings
+
+#### 1. Missing OAuth Scope: `recommendations.read`
+Web SDK example uses scopes we don't have:
+```
+entitlements.read, collection.read, playback, playlists.write,
+collection.write, recommendations.read, user.read, playlists.read
+```
+Our scopes: `user.read, collection.read, playlists.read, playlists.write`
+**Missing:** `recommendations.read` — might be why `userRecommendations` returns empty.
+
+#### 2. Tidal's Diversity Sort Algorithm (from `per-transformers`)
+Their approach to spacing out artists in playlists:
+- Partition tracks by artist AND album
+- For each partition, compute `first_rank` (first appearance position)
+- Apply a `gap` multiplier (default 5) to space out same-artist tracks
+- Final ordering: `min(artist_rank, album_rank) + gap * max(artist_inter_rank, album_inter_rank)`
+- This is more sophisticated than our simple `enforceArtistLimit` — it preserves relevance order while ensuring spacing.
+
+#### 3. Discovery Mix Pipeline (from `tidal-algorithmic-mixes`)
+How Tidal builds personalized discovery playlists:
+1. Use SASRec (Self-Attentive Sequential Recommendation) ML model
+2. Feed user's last 500 listened tracks as sequence
+3. Generate 6,000 candidate recommendations
+4. Flag known vs unknown artists
+5. Distribute known-artist tracks evenly across days of week
+6. Apply diversity sort (space out same artist/album)
+7. Filter out already-streamed tracks and albums
+
+#### 4. API Spec Auto-Updates
+Tidal auto-generates SDK code daily from `tidal-api-reference/tidal-api-oas.json`.
+Our spec (v1.1.4) matches the latest canonical source — we're current.
 
 ## Next Steps
 
