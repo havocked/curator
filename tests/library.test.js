@@ -10,7 +10,7 @@ const {
 const {
   formatTracksAsIds,
   formatTracksAsJson,
-} = require("../dist/commands/search");
+} = require("../dist/commands/library");
 
 test("getFavoritedTracks returns favorites ordered by artist/title", () => {
   const db = openDatabase(":memory:");

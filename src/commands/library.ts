@@ -2,8 +2,7 @@ import { Command } from "commander";
 import { loadConfig } from "../lib/config";
 import { applySchema, getFavoritedTracks, openDatabase, type FavoritedTrack } from "../db";
 
-type SearchOptions = {
-  favorited?: boolean;
+type LibraryOptions = {
   limit?: number;
   format?: string;
 };
@@ -67,11 +66,7 @@ export function formatTracksAsIds(tracks: FavoritedTrack[]): string {
   return tracks.map((track) => String(track.id)).join("\n");
 }
 
-export async function runSearch(options: SearchOptions): Promise<void> {
-  if (!options.favorited) {
-    throw new Error("Only --favorited is supported right now.");
-  }
-
+export async function runLibrary(options: LibraryOptions): Promise<void> {
   const config = loadConfig();
   const db = openDatabase(config.database.path);
   try {
@@ -99,11 +94,10 @@ export async function runSearch(options: SearchOptions): Promise<void> {
   }
 }
 
-export function registerSearchCommand(program: Command): void {
+export function registerLibraryCommand(program: Command): void {
   program
-    .command("search")
-    .description("Find tracks matching criteria")
-    .option("--favorited", "Only tracks marked as favorite")
+    .command("library")
+    .description("List synced favorite tracks from local database")
     .option(
       "--limit <count>",
       "Limit results (default: 50)",
@@ -111,7 +105,7 @@ export function registerSearchCommand(program: Command): void {
       50
     )
     .option("--format <format>", "Output format (text|json|ids)", "text")
-    .action(async (options: SearchOptions) => {
-      await runSearch(options);
+    .action(async (options: LibraryOptions) => {
+      await runLibrary(options);
     });
 }

@@ -11,7 +11,7 @@ import { registerDiscoverCommand } from "./commands/discover";
 import { registerExportCommand } from "./commands/export";
 import { registerFilterCommand } from "./commands/filter";
 import { registerPlaylistCommand } from "./commands/playlist";
-import { registerSearchCommand } from "./commands/search";
+import { registerLibraryCommand } from "./commands/library";
 import { registerSyncCommand } from "./commands/sync";
 
 const program = new Command();
@@ -22,7 +22,7 @@ program
   .version("1.0.0");
 
 registerSyncCommand(program);
-registerSearchCommand(program);
+registerLibraryCommand(program);
 registerExportCommand(program);
 registerFilterCommand(program);
 registerArrangeCommand(program);
