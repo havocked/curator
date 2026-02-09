@@ -39,8 +39,12 @@ function formatTrackList(tracks: Track[]): string[] {
     const key = track.audio_features?.key ?? null;
     const features =
       bpm || key ? ` [${[bpm, key].filter(Boolean).join(", ")}]` : "";
+    const genres =
+      track.enrichment?.artist_genres && track.enrichment.artist_genres.length > 0
+        ? ` {${track.enrichment.artist_genres.slice(0, 3).join(", ")}}`
+        : "";
 
-    return `  ${index + 1}. ${track.title} - ${artist} (${album}, ${year}) [${duration}]${features}`;
+    return `  ${index + 1}. ${track.title} - ${artist} (${album}, ${year}) [${duration}]${features}${genres}`;
   });
 }
 
@@ -91,6 +95,7 @@ export function formatAsJson(
               key: track.audio_features.key ?? null,
             }
           : undefined,
+      enrichment: track.enrichment ?? undefined,
     })),
   };
   return JSON.stringify(output, null, 2);

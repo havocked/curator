@@ -11,6 +11,19 @@ export type Label = {
   founded?: string;
 };
 
+export type ArtistMatch = {
+  mbid: string;
+  name: string;
+  score: number;
+  disambiguation?: string;
+};
+
+export type ArtistGenres = {
+  mbid: string;
+  genres: string[];
+  votes: number[];
+};
+
 export type MusicBrainzClientOptions = {
   fetchFn?: FetchLike;
   userAgent?: string;
@@ -40,9 +53,15 @@ export function createMusicBrainzClient(options: MusicBrainzClientOptions = {}) 
     lastRequestTime = Date.now();
 
     const url = `${MB_BASE_URL}${path}`;
-    const response = await fetchFn(url, { headers: { "User-Agent": userAgent } });
+    let response: { ok: boolean; status: number; json: () => Promise<unknown> };
+    try {
+      response = await fetchFn(url, { headers: { "User-Agent": userAgent } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`MusicBrainz network error: ${msg} (${url})`);
+    }
     if (!response.ok) {
-      throw new Error(`MusicBrainz API error: ${response.status}`);
+      throw new Error(`MusicBrainz API ${response.status} (${path})`);
     }
     return response.json();
   }
@@ -92,12 +111,92 @@ export function createMusicBrainzClient(options: MusicBrainzClientOptions = {}) 
     return artists;
   }
 
+  /**
+   * Search for an artist by name. Returns top match with score.
+   * Uses quoted phrase search to avoid Lucene syntax issues (periods, slashes).
+   * Falls back to first part before "&" if full name returns no results.
+   */
+  async function searchArtist(name: string, limit = 3): Promise<ArtistMatch | null> {
+    const result = await searchArtistExact(name, limit);
+    if (result) return result;
+
+    // Fallback: if name contains "&", try the first part
+    // Handles "Gorillaz & Little Simz" → search "Gorillaz"
+    const ampIdx = name.indexOf(" & ");
+    if (ampIdx > 0) {
+      return searchArtistExact(name.slice(0, ampIdx).trim(), limit);
+    }
+
+    return null;
+  }
+
+  async function searchArtistExact(name: string, limit: number): Promise<ArtistMatch | null> {
+    // Quote the artist name to treat it as a phrase (avoids Lucene syntax issues
+    // with periods, slashes, etc. — e.g. "Fontaines D.C.", "AC/DC")
+    const quoted = `"${name.replace(/"/g, "")}"`;
+    const data = (await mbFetch(
+      `/artist?query=artist:${encodeURIComponent(quoted)}&fmt=json&limit=${limit}`
+    )) as { artists?: Array<{ id: string; name: string; score: number; disambiguation?: string }> };
+
+    const artists = data.artists ?? [];
+    const best = artists[0];
+    if (!best || best.score < 50) return null;
+
+    return {
+      mbid: best.id,
+      name: best.name,
+      score: best.score,
+      ...(best.disambiguation ? { disambiguation: best.disambiguation } : {}),
+    };
+  }
+
+  /**
+   * Get genres for an artist by MBID.
+   * Uses the genres sub-resource (curated, voted-on genres).
+   */
+  async function getArtistGenres(mbid: string): Promise<ArtistGenres> {
+    const data = (await mbFetch(
+      `/artist/${encodeURIComponent(mbid)}?inc=genres&fmt=json`
+    )) as { id: string; genres?: Array<{ name: string; count: number }> };
+
+    const genres = data.genres ?? [];
+    // Sort by vote count descending
+    genres.sort((a, b) => b.count - a.count);
+
+    return {
+      mbid,
+      genres: genres.map((g) => g.name),
+      votes: genres.map((g) => g.count),
+    };
+  }
+
+  /**
+   * Search for artists tagged with a specific genre.
+   * Returns artist names sorted by relevance score.
+   */
+  async function searchArtistsByGenre(genre: string, limit = 25): Promise<string[]> {
+    const data = (await mbFetch(
+      `/artist?query=tag%3A%22${encodeURIComponent(genre)}%22&fmt=json&limit=${limit}`
+    )) as { artists?: Array<{ id: string; name: string; score: number }> };
+
+    const artists = data.artists ?? [];
+    return artists
+      .filter((a) => a.score >= 50)
+      .map((a) => a.name);
+  }
+
   return {
     searchLabel,
     getLabelArtists,
+    searchArtist,
+    getArtistGenres,
+    searchArtistsByGenre,
   };
 }
 
 export const musicBrainzClient = createMusicBrainzClient();
 export const searchLabel = musicBrainzClient.searchLabel;
 export const getLabelArtists = musicBrainzClient.getLabelArtists;
+export const searchArtist = musicBrainzClient.searchArtist;
+export const getArtistGenres = musicBrainzClient.getArtistGenres;
+export const searchArtistsByGenre = musicBrainzClient.searchArtistsByGenre;

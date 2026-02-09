@@ -77,6 +77,9 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--popularity-max <value>", "Max popularity (0.0-1.0)", parseFloat)
     .option("--year-min <year>", "Min release year", (v) => Number.parseInt(v, 10))
     .option("--year-max <year>", "Max release year", (v) => Number.parseInt(v, 10))
+    .option("--no-enrich", "Skip MusicBrainz genre enrichment")
+    .option("--genre-filter <genre>", "Filter by MusicBrainz genre")
+    .option("--refresh-cache", "Force re-fetch all enrichment data")
     .action(async (options: DiscoverOptions) => {
       await runDiscover(options);
     });

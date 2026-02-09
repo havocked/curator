@@ -7,6 +7,7 @@ installNodeStorage();
 import { Command } from "commander";
 import { registerArrangeCommand } from "./commands/arrange";
 import { registerAuthCommand } from "./commands/auth";
+import { registerCacheCommand } from "./commands/cache";
 import { registerDiscoverCommand } from "./commands/discover";
 import { registerExportCommand } from "./commands/export";
 import { registerFilterCommand } from "./commands/filter";
@@ -23,11 +24,12 @@ program
 
 registerSyncCommand(program);
 registerLibraryCommand(program);
-registerExportCommand(program);
+registerDiscoverCommand(program);
 registerFilterCommand(program);
 registerArrangeCommand(program);
-registerDiscoverCommand(program);
+registerExportCommand(program);
 registerPlaylistCommand(program);
+registerCacheCommand(program);
 registerAuthCommand(program);
 
 program.parseAsync(process.argv).catch((error) => {
