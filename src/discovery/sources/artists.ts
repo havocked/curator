@@ -3,19 +3,19 @@ import { runConcurrent } from "../../lib/concurrent";
 import {
   getArtistTopTracks,
   searchArtists,
-} from "../../services/tidalSdk";
+} from "../../services/tidal";
 import type { Track } from "../../services/types";
 import { dedupeTracks } from "../filters";
 import type { DiscoveryContext, DiscoveryResult } from "../types";
 
-const ARTIST_CONCURRENCY = 2;
+const ARTIST_CONCURRENCY = 3;
 
 async function resolveArtistTracks(
   names: string[],
   limitPerArtist: number
 ): Promise<Track[]> {
   // Step 1: Search all artists in parallel
-  log(`[discover] Searching ${names.length} artists...`);
+  log(`[discover] Searching ${names.length} artists (concurrency: ${ARTIST_CONCURRENCY})...`);
   const searchResults = await runConcurrent(
     names.map((name) => async () => {
       const artist = await searchArtists(name);
