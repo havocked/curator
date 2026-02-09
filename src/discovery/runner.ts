@@ -101,9 +101,8 @@ async function resolveSource(
   const tags = parseTags(options.tags);
   const genre = options.genre?.trim();
 
-  // When --enrich is set, use MusicBrainz for genre discovery (real genres)
-  // Otherwise fall back to Tidal text search
-  if (genre && options.enrich && !tags.length) {
+  // Use MusicBrainz for genre discovery (real genres) unless --no-enrich
+  if (genre && options.enrich !== false && !tags.length) {
     return discoverFromGenre(genre, ctx);
   }
 
@@ -193,8 +192,8 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     );
   }
 
-  // 3. Enrich tracks (opt-in)
-  if (options.enrich) {
+  // 3. Enrich tracks (default on, skip with --no-enrich)
+  if (options.enrich !== false) {
     const db = openDatabase(config.database.path);
     try {
       applySchema(db);
@@ -224,12 +223,8 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     }
   }
 
-  // 4. Genre filter (requires --enrich)
+  // 4. Genre filter
   if (options.genreFilter) {
-    if (!options.enrich) {
-      console.error("Error: --genre-filter requires --enrich flag");
-      process.exit(1);
-    }
     const beforeCount = result.tracks.length;
     result.tracks = filterByGenre(result.tracks, options.genreFilter);
     log(
