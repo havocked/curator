@@ -7,6 +7,8 @@ import {
   getArtistAlbums,
   getArtistTopTracks,
   getPlaylistTracks,
+  getSimilarTracks,
+  getTrackRadio,
   initTidalClient,
   searchArtists,
   searchTracks,
@@ -17,6 +19,8 @@ type DiscoverOptions = {
   playlist?: string;
   album?: string;
   latestAlbum?: string;
+  similar?: string;
+  radio?: string;
   genre?: string;
   tags?: string;
   artists?: string;
@@ -38,6 +42,8 @@ type DiscoverFormat = "json" | "text" | "ids";
 type DiscoverQuery = {
   playlist?: string;
   album?: string;
+  similar?: string;
+  radio?: string;
   genre?: string;
   tags?: string[];
   artists?: string[];
@@ -224,13 +230,17 @@ export function formatDiscoverAsJson(
 ): string {
   const source = query.label
     ? "label"
-    : query.artists
-      ? "artists"
-      : query.album
-        ? "album"
-        : query.playlist
-          ? "playlist"
-          : "search";
+    : query.similar
+      ? "similar"
+      : query.radio
+        ? "radio"
+        : query.artists
+          ? "artists"
+          : query.album
+            ? "album"
+            : query.playlist
+              ? "playlist"
+              : "search";
   const output = {
     count: tracks.length,
     source,
@@ -344,6 +354,24 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     if (tracks.length === 0) {
       throw new Error(`No tracks found for album: ${latest.title}`);
     }
+  } else if (options.similar) {
+    await initTidalClient();
+    const seedId = options.similar;
+    console.error(`[discover] Finding tracks similar to: ${seedId}`);
+    tracks = await getSimilarTracks(seedId, limit);
+    console.error(`[discover] Got ${tracks.length} similar tracks`);
+    if (tracks.length === 0) {
+      throw new Error(`No similar tracks found for track: ${seedId}`);
+    }
+  } else if (options.radio) {
+    await initTidalClient();
+    const seedId = options.radio;
+    console.error(`[discover] Getting radio for track: ${seedId}`);
+    tracks = await getTrackRadio(seedId, limit);
+    console.error(`[discover] Got ${tracks.length} radio tracks`);
+    if (tracks.length === 0) {
+      throw new Error(`No radio tracks found for track: ${seedId}`);
+    }
   } else if (options.album) {
     await initTidalClient();
     albumId = options.album;
@@ -398,13 +426,17 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   const db = openDatabase(config.database.path);
   const discoveredVia = labelName
     ? `label:${labelName.toLowerCase()}`
-    : albumId
-      ? `album:${albumId}`
-      : playlistId
-        ? `playlist:${playlistId}`
-        : artistNames
-          ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
-          : `search:${(options.genre ?? "unknown").toLowerCase()}`;
+    : options.similar
+      ? `similar:${options.similar}`
+      : options.radio
+        ? `radio:${options.radio}`
+        : albumId
+          ? `album:${albumId}`
+          : playlistId
+            ? `playlist:${playlistId}`
+            : artistNames
+              ? `artists:${artistNames.map((name) => name.toLowerCase()).join(",")}`
+              : `search:${(options.genre ?? "unknown").toLowerCase()}`;
   try {
     applySchema(db);
     upsertDiscoveredTracks(db, tracks, discoveredVia);
@@ -415,13 +447,17 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
   if (format === "text") {
     const sourceLabel = labelName
       ? `label:${labelName}`
-      : albumId
-        ? `album:${albumId}`
-        : playlistId
-          ? `playlist:${playlistId}`
-          : artistNames
-            ? `artists:${artistNames.join(", ")}`
-            : "playlist-search";
+      : options.similar
+        ? `similar:${options.similar}`
+        : options.radio
+          ? `radio:${options.radio}`
+          : albumId
+            ? `album:${albumId}`
+            : playlistId
+              ? `playlist:${playlistId}`
+              : artistNames
+                ? `artists:${artistNames.join(", ")}`
+                : "playlist-search";
     console.log(formatDiscoverAsText(sourceLabel, tracks));
     return;
   }
@@ -436,6 +472,12 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
 
   const query: DiscoverQuery = { limit };
   const tags = parseTags(options.tags);
+  if (options.similar) {
+    query.similar = options.similar;
+  }
+  if (options.radio) {
+    query.radio = options.radio;
+  }
   if (playlistId) {
     query.playlist = playlistId;
   }
@@ -465,6 +507,8 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--playlist <id>", "Discover tracks from a playlist ID")
     .option("--album <id>", "Discover all tracks from an album")
     .option("--latest-album <artist>", "Discover tracks from an artist's latest album")
+    .option("--similar <track-id>", "Discover tracks similar to a seed track")
+    .option("--radio <track-id>", "Get radio-style playlist from a seed track")
     .option("--genre <genre>", "Discover tracks by genre")
     .option("--tags <tags>", "Comma-separated tags to refine genre search")
     .option("--artists <names>", "Comma-separated artist names")

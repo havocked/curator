@@ -626,6 +626,71 @@ export async function getTrack(trackId: number): Promise<Track | null> {
   return tracks[0] ?? null;
 }
 
+// --- Similar Tracks ---
+
+export async function getSimilarTracks(
+  trackId: string,
+  limit = 20
+): Promise<Track[]> {
+  const client = getClient();
+
+  const resp = await client.GET("/tracks/{id}/relationships/similarTracks", {
+    params: {
+      path: { id: trackId },
+      query: {
+        countryCode: COUNTRY_CODE,
+        include: ["artists", "albums"],
+        "page[limit]": limit,
+      },
+    },
+  } as never);
+
+  const { data } = resp;
+  const trackIds = ((data as unknown as { data?: ResourceId[] })?.data ?? []).map((r) => r.id);
+  if (trackIds.length === 0) return [];
+
+  return fetchTracksByIds(client, trackIds.slice(0, limit));
+}
+
+// --- Track Radio ---
+
+export async function getTrackRadio(
+  trackId: string,
+  limit = 20
+): Promise<Track[]> {
+  const client = getClient();
+
+  // Track radio returns a playlist reference
+  const resp = await client.GET("/tracks/{id}/relationships/radio", {
+    params: {
+      path: { id: trackId },
+      query: { countryCode: COUNTRY_CODE },
+    },
+  } as never);
+
+  const { data } = resp;
+  const responseData = ((data ?? {}) as { data?: ResourceId | ResourceId[] }).data;
+
+  if (Array.isArray(responseData)) {
+    // Check if it's playlist references or track IDs
+    const playlists = responseData.filter((r) => r.type === "playlists");
+    if (playlists.length > 0 && playlists[0]?.id) {
+      return getPlaylistTracks(playlists[0].id, limit);
+    }
+    // Otherwise treat as track IDs
+    const trackIds = responseData.filter((r) => r.type === "tracks").map((r) => r.id);
+    if (trackIds.length === 0) return [];
+    return fetchTracksByIds(client, trackIds.slice(0, limit));
+  }
+
+  if (responseData?.id) {
+    // Single playlist reference
+    return getPlaylistTracks(responseData.id, limit);
+  }
+
+  return [];
+}
+
 // --- Playlist Management ---
 
 const PLAYLIST_ITEMS_BATCH = 20; // API max per request
