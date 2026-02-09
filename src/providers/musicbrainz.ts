@@ -170,11 +170,27 @@ export function createMusicBrainzClient(options: MusicBrainzClientOptions = {}) 
     };
   }
 
+  /**
+   * Search for artists tagged with a specific genre.
+   * Returns artist names sorted by relevance score.
+   */
+  async function searchArtistsByGenre(genre: string, limit = 25): Promise<string[]> {
+    const data = (await mbFetch(
+      `/artist?query=tag%3A%22${encodeURIComponent(genre)}%22&fmt=json&limit=${limit}`
+    )) as { artists?: Array<{ id: string; name: string; score: number }> };
+
+    const artists = data.artists ?? [];
+    return artists
+      .filter((a) => a.score >= 50)
+      .map((a) => a.name);
+  }
+
   return {
     searchLabel,
     getLabelArtists,
     searchArtist,
     getArtistGenres,
+    searchArtistsByGenre,
   };
 }
 
@@ -183,3 +199,4 @@ export const searchLabel = musicBrainzClient.searchLabel;
 export const getLabelArtists = musicBrainzClient.getLabelArtists;
 export const searchArtist = musicBrainzClient.searchArtist;
 export const getArtistGenres = musicBrainzClient.getArtistGenres;
+export const searchArtistsByGenre = musicBrainzClient.searchArtistsByGenre;

@@ -13,6 +13,7 @@ import {
 } from "./formatting";
 import { discoverFromAlbum, discoverFromLatestAlbum } from "./sources/album";
 import { discoverFromArtists } from "./sources/artists";
+import { discoverFromGenre } from "./sources/genre";
 import { discoverFromLabel } from "./sources/label";
 import { discoverFromPlaylist } from "./sources/playlist";
 import { discoverFromRadio } from "./sources/radio";
@@ -99,6 +100,13 @@ async function resolveSource(
 
   const tags = parseTags(options.tags);
   const genre = options.genre?.trim();
+
+  // When --enrich is set, use MusicBrainz for genre discovery (real genres)
+  // Otherwise fall back to Tidal text search
+  if (genre && options.enrich && !tags.length) {
+    return discoverFromGenre(genre, ctx);
+  }
+
   return discoverFromSearch(genre, tags, ctx);
 }
 
