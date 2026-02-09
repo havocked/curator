@@ -45,6 +45,12 @@ curator discover --artists "Justice,Daft Punk,Moderat" --limit-per-artist 5
 # By record label (MusicBrainz lookup → Tidal artist search)
 curator discover --label "Ed Banger Records" --limit-per-artist 3
 
+# By similar tracks (Tidal recommendation engine)
+curator discover --similar <track-id>
+
+# By track radio (radio-style playlist from seed track)
+curator discover --radio <track-id>
+
 # By playlist ID
 curator discover --playlist <tidal-playlist-uuid>
 
@@ -189,6 +195,14 @@ curator discover --artists "Khruangbin,Tame Impala,Melody's Echo Chamber" \
   --limit-per-artist 3 --format json | \
   curator arrange --arc gentle_rise --max-per-artist 1 | \
   curator export --format tidal
+
+# Similar tracks from a seed (Tidal recommendation engine)
+curator discover --similar 251380837 --format ids | \
+  curator playlist create --name "Similar Vibes"
+
+# Radio-style playlist from a track
+curator discover --radio 251380837 --limit 30 --format ids | \
+  curator playlist create --name "Radio Mix"
 ```
 
 ## Project Structure
@@ -199,15 +213,40 @@ curator/
 │   ├── cli.ts                    # Entry point, registers all commands
 │   ├── commands/
 │   │   ├── auth.ts               # OAuth login/status/logout (PKCE)
-│   │   ├── discover.ts           # Track discovery + filters
+│   │   ├── discover.ts           # CLI registration + backward-compat exports
 │   │   ├── arrange.ts            # BPM arrangement + artist limiting
 │   │   ├── playlist.ts           # Tidal playlist creation
 │   │   ├── sync.ts               # Favorites sync (SDK or service)
 │   │   ├── filter.ts             # Familiar/discovery filtering
 │   │   ├── search.ts             # Local DB search (favorited only)
 │   │   └── export.ts             # Track ID extraction
+│   ├── discovery/                # Discovery module (separated concerns)
+│   │   ├── runner.ts             # Orchestrator: resolve → filter → persist → format
+│   │   ├── filters.ts            # Track dedup + filtering
+│   │   ├── formatting.ts         # Text/JSON/IDs output formatting
+│   │   ├── types.ts              # DiscoveryContext, DiscoveryResult, TrackFilters
+│   │   ├── index.ts              # Barrel export
+│   │   └── sources/              # One file per discovery source
+│   │       ├── playlist.ts
+│   │       ├── album.ts
+│   │       ├── artists.ts        # Parallel search (concurrency 3) + retry
+│   │       ├── similar.ts
+│   │       ├── radio.ts
+│   │       ├── label.ts
+│   │       └── search.ts
 │   ├── services/
-│   │   ├── tidalSdk.ts           # Official Tidal SDK client
+│   │   ├── tidal/                # Tidal SDK (separated concerns)
+│   │   │   ├── client.ts         # Auth singleton, init, getClient()
+│   │   │   ├── mappers.ts        # Pure transforms: API → Track type
+│   │   │   ├── fetcher.ts        # Batch fetch with rate limiting
+│   │   │   ├── search.ts         # Artist & track search (with empty retry)
+│   │   │   ├── artists.ts        # Top tracks, discography
+│   │   │   ├── albums.ts         # Album tracks
+│   │   │   ├── tracks.ts         # Single track, similar, radio
+│   │   │   ├── playlists.ts      # Playlist CRUD, favorites
+│   │   │   ├── types.ts          # SDK types, constants
+│   │   │   └── index.ts          # Barrel export
+│   │   ├── tidalSdk.ts           # Re-export shim (backward compat)
 │   │   ├── tidalService.ts       # HTTP service fallback (--via service)
 │   │   ├── nodeStorage.ts        # localStorage polyfill for Node.js
 │   │   └── types.ts              # Track, Artist, Album, Playlist types
@@ -215,11 +254,14 @@ curator/
 │   │   └── musicbrainz.ts        # Label search + artist roster lookup
 │   ├── lib/
 │   │   ├── config.ts             # YAML config loader
-│   │   └── paths.ts              # Path helpers
+│   │   ├── paths.ts              # Path helpers
+│   │   ├── retry.ts              # 429 retry + empty-result retry (exponential backoff)
+│   │   ├── concurrent.ts         # Parallel task runner with concurrency limit
+│   │   └── logger.ts             # stderr logger (keeps stdout clean for pipes)
 │   └── db/
 │       ├── index.ts              # SQLite operations
 │       └── schema.ts             # Table definitions
-├── tests/                        # Unit tests (30 passing)
+├── tests/                        # 85 unit tests
 ├── data/
 │   └── curator.db                # Local track cache (SQLite)
 └── references/
@@ -249,7 +291,7 @@ See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 ```bash
 npm install
 npm run build
-npm test           # 30 tests
+npm test           # 85 tests
 
 node dist/cli.js discover --help
 node dist/cli.js arrange --help
