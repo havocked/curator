@@ -176,12 +176,19 @@ Our spec (v1.1.4) matches the latest canonical source — we're current.
 
 ## Next Steps
 
-### High Impact
-- [ ] **Integrate `similarTracks`** — `discover --similar <track-id>` or `--radio <track-id>` for recommendation-based discovery
-- [ ] **Integrate `topHits` search** — smarter mixed-type search (artists + tracks + albums in one query)
+### High Impact — Tidal Endpoints (confirmed working, needs integration)
+- [ ] **`discover --similar <track-id>`** — `GET /tracks/{id}/relationships/similarTracks` → 20 similar tracks. Chainable: seed → similar → similar → deduplicate.
+- [ ] **`discover --radio <track-id>`** — `GET /tracks/{id}/relationships/radio` → playlist of radio-style tracks. Returns a playlist ID, resolve via `/playlists/{id}/relationships/items`.
+- [ ] **`discover --my-mixes`** — `GET /userRecommendations/{userId}/relationships/myMixes` → 8 personalized playlists. Requires `recommendations.read` scope.
+- [ ] **`discover --discovery-mix`** — `GET /userRecommendations/{userId}/relationships/discoveryMixes` → daily discovery playlist.
+- [ ] **`discover --new-arrivals`** — `GET /userRecommendations/{userId}/relationships/newArrivalMixes` → new releases matching taste.
+- [ ] **Integrate `topHits` search** — `GET /searchResults/{id}/relationships/topHits` → mixed artists + tracks + albums ranked by relevance. Smarter than tracks-only search.
+
+### High Impact — Other
 - [ ] **Remaster deduplication** — fingerprint-based dedup (same title + same artist → keep one)
 - [ ] **`playlist create --interactive`** — preview/reject tracks before creating
 - [ ] **`--exclude-artists`** — blocklist specific artists from results
+- [ ] **Port Tidal's DiversitySortTransformer** — gap-based artist/album spacing (from `per-transformers` repo). Smarter than current `enforceArtistLimit`.
 
 ### Medium Impact
 - [ ] **Show all credited artists** — fix primary-artist-only display (e.g., London Grammar feat. SebastiAn)
