@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { runConcurrent } from "../lib/concurrent";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
 import { getLabelArtists, searchLabel } from "../providers/musicbrainz";
@@ -147,36 +148,48 @@ export function filterTracks(tracks: Track[], filters: TrackFilters): Track[] {
   });
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const ARTIST_CONCURRENCY = 2;
 
 async function discoverByArtists(
   names: string[],
   limitPerArtist: number
 ): Promise<Track[]> {
+  // Step 1: Search all artists in parallel
+  console.error(`[discover] Searching ${names.length} artists...`);
+  const searchResults = await runConcurrent(
+    names.map((name) => async () => {
+      const artist = await searchArtists(name);
+      if (artist) {
+        console.error(`[discover] Found: ${name} (ID: ${artist.id})`);
+      } else {
+        console.error(`[discover] No results for: ${name}`);
+      }
+      return artist;
+    }),
+    ARTIST_CONCURRENCY
+  );
+
+  const artists = searchResults.filter(
+    (a): a is { id: number; name: string; picture: string | null } => a != null
+  );
+
+  if (artists.length === 0) return [];
+
+  // Step 2: Get top tracks for all artists in parallel
+  console.error(`[discover] Getting tracks for ${artists.length} artists...`);
+  const trackGroups = await runConcurrent(
+    artists.map((artist) => async () => {
+      const tracks = await getArtistTopTracks(artist.id, limitPerArtist);
+      console.error(`[discover] ${artist.name}: ${tracks.length} tracks`);
+      return tracks;
+    }),
+    ARTIST_CONCURRENCY
+  );
+
+  // Merge all tracks
   const collected: Track[] = [];
-
-  for (const name of names) {
-    console.error(`[discover] Searching for artist: ${name}`);
-    const artists = await searchArtists(name, 1);
-    console.error(`[discover] Found ${artists.length} artists`);
-
-    if (artists.length === 0) {
-      console.error(`[discover] No artists found for: ${name}`);
-      continue;
-    }
-
-    const artist = artists[0];
-    if (!artist) {
-      continue;
-    }
-    console.error(`[discover] Getting tracks for artist: ${artist.name} (ID: ${artist.id})`);
-    // Small delay to avoid rate limiting after search requests
-    await wait(300);
-    const tracks = await getArtistTopTracks(artist.id, limitPerArtist);
-    console.error(`[discover] Got ${tracks.length} tracks`);
-    collected.push(...tracks);
+  for (const group of trackGroups) {
+    if (group) collected.push(...group);
   }
 
   return dedupeTracks(collected);
@@ -335,11 +348,10 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
     await initTidalClient();
     const artistName = options.latestAlbum.trim();
     console.error(`[discover] Searching for artist: ${artistName}`);
-    const artists = await searchArtists(artistName, 1);
-    if (artists.length === 0) {
+    const artist = await searchArtists(artistName);
+    if (!artist) {
       throw new Error(`Artist not found: ${artistName}`);
     }
-    const artist = artists[0]!;
     console.error(`[discover] Found: ${artist.name} (ID: ${artist.id})`);
     console.error(`[discover] Fetching discography...`);
     const albums = await getArtistAlbums(artist.id);

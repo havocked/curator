@@ -4,6 +4,7 @@ import { trueTime } from "@tidal-music/true-time";
 import fs from "fs";
 import path from "path";
 import { expandHome } from "../lib/paths";
+import { withRetry } from "../lib/retry";
 import type { Album, Artist, Track } from "./types";
 
 // Suppress noisy "TrueTime is not yet synchronized" from SDK internals
@@ -245,15 +246,19 @@ async function fetchTracksByIds(
     if (i > 0) await delay(RATE_LIMIT_MS);
 
     const chunk = trackIds.slice(i, i + BATCH_SIZE);
-    const { data } = await client.GET("/tracks", {
-      params: {
-        query: {
-          countryCode: COUNTRY_CODE,
-          "filter[id]": chunk,
-          include: ["artists", "albums", "genres"],
-        },
-      },
-    });
+    const { data } = await withRetry(
+      () =>
+        client.GET("/tracks", {
+          params: {
+            query: {
+              countryCode: COUNTRY_CODE,
+              "filter[id]": chunk,
+              include: ["artists", "albums", "genres"],
+            },
+          },
+        }),
+      { label: `fetchTracks(${chunk.length} ids)` }
+    );
 
     const included = data?.included ?? [];
     const includedMap = buildIncludedMap(included);
@@ -277,56 +282,25 @@ async function fetchTracksByIds(
 // --- Search ---
 
 export async function searchArtists(
-  query: string,
-  limit = 10
-): Promise<Artist[]> {
+  query: string
+): Promise<Artist | null> {
   const client = getClient();
-  const fetchLimit = Math.min(Math.max(limit, 3), 10);
 
-  const { data: searchData } = await client.GET(
-    "/searchResults/{id}/relationships/artists",
-    {
-      params: {
-        path: { id: query },
-        query: { countryCode: COUNTRY_CODE, "page[limit]": fetchLimit },
-      },
-    }
+  const { data } = await withRetry(
+    () =>
+      client.GET("/searchResults/{id}/relationships/artists", {
+        params: {
+          path: { id: query },
+          query: { countryCode: COUNTRY_CODE, "page[limit]": 1 },
+        },
+      }),
+    { label: `searchArtists("${query}")` }
   );
 
-  const ids = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
-  if (ids.length === 0) return [];
+  const id = data?.data?.[0]?.id;
+  if (!id) return null;
 
-  // Fetch details with rate limiting + name matching
-  const candidates: Array<Artist & { popularity: number; exactMatch: boolean }> = [];
-
-  for (const id of ids) {
-    await delay(RATE_LIMIT_MS);
-    const { data } = await client.GET("/artists/{id}", {
-      params: {
-        path: { id },
-        query: { countryCode: COUNTRY_CODE },
-      },
-    });
-    const artist = data?.data;
-    if (!artist?.attributes) continue;
-
-    const name = artist.attributes.name;
-    candidates.push({
-      id: parseInt(artist.id, 10),
-      name,
-      picture: null,
-      popularity: artist.attributes.popularity ?? 0,
-      exactMatch: name.toLowerCase() === query.toLowerCase(),
-    });
-  }
-
-  // Exact name match first, then popularity
-  candidates.sort((a, b) => {
-    if (a.exactMatch !== b.exactMatch) return a.exactMatch ? -1 : 1;
-    return b.popularity - a.popularity;
-  });
-
-  return candidates.slice(0, limit).map(({ popularity, exactMatch, ...a }) => a);
+  return { id: parseInt(id, 10), name: query, picture: null };
 }
 
 export async function searchTracks(
@@ -335,14 +309,15 @@ export async function searchTracks(
 ): Promise<Track[]> {
   const client = getClient();
 
-  const { data: searchData } = await client.GET(
-    "/searchResults/{id}/relationships/tracks",
-    {
-      params: {
-        path: { id: query },
-        query: { countryCode: COUNTRY_CODE, "page[limit]": limit },
-      },
-    }
+  const { data: searchData } = await withRetry(
+    () =>
+      client.GET("/searchResults/{id}/relationships/tracks", {
+        params: {
+          path: { id: query },
+          query: { countryCode: COUNTRY_CODE, "page[limit]": limit },
+        },
+      }),
+    { label: `searchTracks("${query}")` }
   );
 
   const trackIds = searchData?.data?.map((r: ResourceId) => r.id) ?? [];
@@ -359,16 +334,20 @@ export async function getArtistTopTracks(
 ): Promise<Track[]> {
   const client = getClient();
 
-  const { data } = await client.GET("/artists/{id}/relationships/tracks", {
-    params: {
-      path: { id: String(artistId) },
-      query: {
-        countryCode: COUNTRY_CODE,
-        collapseBy: "FINGERPRINT",
-        "page[limit]": limit,
-      },
-    },
-  });
+  const { data } = await withRetry(
+    () =>
+      client.GET("/artists/{id}/relationships/tracks", {
+        params: {
+          path: { id: String(artistId) },
+          query: {
+            countryCode: COUNTRY_CODE,
+            collapseBy: "FINGERPRINT",
+            "page[limit]": limit,
+          },
+        },
+      }),
+    { label: `getTopTracks(${artistId})` }
+  );
 
   const trackIds = data?.data?.map((r: ResourceId) => r.id) ?? [];
   if (trackIds.length === 0) return [];
@@ -388,15 +367,19 @@ export async function getArtistAlbums(
 
   // Paginate to collect album IDs
   while (albumIds.length < limit) {
-    const { data } = await client.GET("/artists/{id}/relationships/albums", {
-      params: {
-        path: { id: String(artistId) },
-        query: {
-          countryCode: COUNTRY_CODE,
-          ...(cursor ? { "page[cursor]": cursor } : {}),
-        },
-      },
-    });
+    const { data } = await withRetry(
+      () =>
+        client.GET("/artists/{id}/relationships/albums", {
+          params: {
+            path: { id: String(artistId) },
+            query: {
+              countryCode: COUNTRY_CODE,
+              ...(cursor ? { "page[cursor]": cursor } : {}),
+            },
+          },
+        }),
+      { label: `getArtistAlbums(${artistId})` }
+    );
 
     const ids = (data as { data?: ResourceId[] })?.data?.map((r) => r.id) ?? [];
     if (ids.length === 0) break;
@@ -421,15 +404,19 @@ export async function getArtistAlbums(
   for (let i = 0; i < albumIds.length; i += ALBUM_BATCH_SIZE) {
     const batch = albumIds.slice(i, i + ALBUM_BATCH_SIZE);
 
-    const { data } = await client.GET("/albums", {
-      params: {
-        query: {
-          countryCode: COUNTRY_CODE,
-          "filter[id]": batch,
-          include: ["artists"],
-        },
-      },
-    });
+    const { data } = await withRetry(
+      () =>
+        client.GET("/albums", {
+          params: {
+            query: {
+              countryCode: COUNTRY_CODE,
+              "filter[id]": batch,
+              include: ["artists"],
+            },
+          },
+        }),
+      { label: `fetchAlbums(${batch.length} ids)` }
+    );
 
     const includedMap = buildIncludedMap(
       ((data as { included?: IncludedResource[] })?.included ?? [])
@@ -487,15 +474,19 @@ export async function getAlbumTracks(
   let cursor: string | undefined;
 
   while (allTrackIds.length < limit) {
-    const { data } = await client.GET("/albums/{id}/relationships/items", {
-      params: {
-        path: { id: albumId },
-        query: {
-          countryCode: COUNTRY_CODE,
-          ...(cursor ? { "page[cursor]": cursor } : {}),
-        },
-      },
-    });
+    const { data } = await withRetry(
+      () =>
+        client.GET("/albums/{id}/relationships/items", {
+          params: {
+            path: { id: albumId },
+            query: {
+              countryCode: COUNTRY_CODE,
+              ...(cursor ? { "page[cursor]": cursor } : {}),
+            },
+          },
+        }),
+      { label: `getAlbumTracks(${albumId})` }
+    );
 
     const ids =
       (data as { data?: ResourceId[] })?.data
@@ -529,15 +520,19 @@ export async function getPlaylistTracks(
 ): Promise<Track[]> {
   const client = getClient();
 
-  const { data } = await client.GET("/playlists/{id}/relationships/items", {
-    params: {
-      path: { id: playlistId },
-      query: {
-        countryCode: COUNTRY_CODE,
-        "page[limit]": limit,
-      },
-    },
-  });
+  const { data } = await withRetry(
+    () =>
+      client.GET("/playlists/{id}/relationships/items", {
+        params: {
+          path: { id: playlistId },
+          query: {
+            countryCode: COUNTRY_CODE,
+            "page[limit]": limit,
+          },
+        },
+      }),
+    { label: `getPlaylistTracks(${playlistId.substring(0, 8)})` }
+  );
 
   // Extract track IDs from relationship data
   const trackIds =
@@ -570,25 +565,27 @@ export async function getFavoriteTracks(limit = 500): Promise<Track[]> {
       queryParams["page[cursor]"] = cursor;
     }
 
-    const { data, error } = await client.GET(
-      "/userCollections/{id}/relationships/tracks",
-      {
-        params: {
-          path: { id: userId },
-          query: queryParams as {
-            locale: string;
-            countryCode?: string;
-            include?: string[];
-            "page[cursor]"?: string;
+    const { data, error } = await withRetry(
+      () =>
+        client.GET("/userCollections/{id}/relationships/tracks", {
+          params: {
+            path: { id: userId! },
+            query: queryParams as {
+              locale: string;
+              countryCode?: string;
+              include?: string[];
+              "page[cursor]"?: string;
+            },
           },
-        },
-      }
+        }),
+      { label: "getFavoriteTracks" }
     );
 
     if (error) {
+      const errObj = error as Record<string, unknown>;
       const detail =
-        "errors" in error
-          ? (error.errors as Array<{ detail?: string }>)[0]?.detail
+        "errors" in errObj
+          ? (errObj.errors as Array<{ detail?: string }>)[0]?.detail
           : String(error);
       throw new Error(`Failed to fetch favorites: ${detail}`);
     }
@@ -634,16 +631,20 @@ export async function getSimilarTracks(
 ): Promise<Track[]> {
   const client = getClient();
 
-  const resp = await client.GET("/tracks/{id}/relationships/similarTracks", {
-    params: {
-      path: { id: trackId },
-      query: {
-        countryCode: COUNTRY_CODE,
-        include: ["artists", "albums"],
-        "page[limit]": limit,
-      },
-    },
-  } as never);
+  const resp = await withRetry(
+    () =>
+      client.GET("/tracks/{id}/relationships/similarTracks", {
+        params: {
+          path: { id: trackId },
+          query: {
+            countryCode: COUNTRY_CODE,
+            include: ["artists", "albums"],
+            "page[limit]": limit,
+          },
+        },
+      } as never),
+    { label: `similarTracks(${trackId})` }
+  );
 
   const { data } = resp;
   const trackIds = ((data as unknown as { data?: ResourceId[] })?.data ?? []).map((r) => r.id);
@@ -661,12 +662,16 @@ export async function getTrackRadio(
   const client = getClient();
 
   // Track radio returns a playlist reference
-  const resp = await client.GET("/tracks/{id}/relationships/radio", {
-    params: {
-      path: { id: trackId },
-      query: { countryCode: COUNTRY_CODE },
-    },
-  } as never);
+  const resp = await withRetry(
+    () =>
+      client.GET("/tracks/{id}/relationships/radio", {
+        params: {
+          path: { id: trackId },
+          query: { countryCode: COUNTRY_CODE },
+        },
+      } as never),
+    { label: `trackRadio(${trackId})` }
+  );
 
   const { data } = resp;
   const responseData = ((data ?? {}) as { data?: ResourceId | ResourceId[] }).data;
