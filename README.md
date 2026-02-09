@@ -276,6 +276,12 @@ curator/
 | `~/.config/curator/auth-storage.json` | Encrypted SDK tokens (auto-managed) |
 | `~/.config/curator/config.yaml` | Optional: override DB path, service URL |
 
+## Credits & Data Sources
+
+- **[Tidal](https://tidal.com)** — Music catalog, streaming, and playlist management
+- **[MusicBrainz](https://musicbrainz.org)** — Open music encyclopedia for artist genres and label data
+- **[GetSongBPM](https://getsongbpm.com)** — Song tempo (BPM) and key database
+
 ## Known Limitations
 
 - **Genre/mood data is internal-only** — Tidal's genre API endpoints require internal access tier. `--genre` does keyword search, not genre-aware filtering.

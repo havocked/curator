@@ -203,9 +203,20 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
       const cacheStats = cache.stats();
       log(`[enrich] Cache: ${cacheStats.found} artists cached, ${cacheStats.notFound} not-found`);
 
+      // BPM client (optional — needs GETSONGBPM_API_KEY)
+      let bpmClient: import("../enrichment/index.js").GetSongBPMClient | undefined;
+      const bpmApiKey = process.env.GETSONGBPM_API_KEY;
+      if (bpmApiKey) {
+        const { createGetSongBPMClient } = await import("../providers/getsongbpm.js");
+        bpmClient = createGetSongBPMClient({ apiKey: bpmApiKey });
+        const bpmCacheStats = cache.bpmStats();
+        log(`[enrich] BPM cache: ${bpmCacheStats.found} tracks cached, ${bpmCacheStats.notFound} not-found`);
+      }
+
       const { tracks: enriched, stats } = await enrichTracks(result.tracks, {
         cache,
         mbClient,
+        bpmClient,
         onProgress: (done, total, artist) => {
           process.stderr.write(`\r[enrich] ${done}/${total} artists — ${artist}   `);
         },
@@ -218,6 +229,11 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
       log(
         `[enrich] Done: ${stats.uniqueArtists} artists (${stats.cacheHits} cached, ${stats.apiCalls} API calls, ${stats.notFound} not found)`
       );
+      if (bpmClient) {
+        log(
+          `[enrich] BPM: ${stats.bpm.eligible} tracks needed BPM (${stats.bpm.cacheHits} cached, ${stats.bpm.found} found, ${stats.bpm.notFound} not found, ${stats.bpm.errors} errors)`
+        );
+      }
     } finally {
       db.close();
     }

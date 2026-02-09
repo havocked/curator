@@ -2,7 +2,11 @@ export interface EnrichmentMetadata {
   artist_mbid?: string;
   artist_genres?: string[];
   artist_genre_votes?: number[];
-  // Future: Last.fm moods, GetSongBPM data
+  // GetSongBPM — fills BPM/key gaps when Tidal returns null
+  getsongbpm_bpm?: number;
+  getsongbpm_key?: string;
+  getsongbpm_time_sig?: string;
+  // Future: Last.fm moods
   enriched_at?: string;
   enrichment_sources?: string[];
 }

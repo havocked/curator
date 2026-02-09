@@ -1,6 +1,7 @@
 import type { Track } from "../services/types.js";
 import type { EnrichmentCache, CachedArtist } from "./cache.js";
 import type { ArtistMatch, ArtistGenres } from "../providers/musicbrainz.js";
+import type { TrackBPM } from "../providers/getsongbpm.js";
 import { normalizeArtistName } from "../lib/artist.js";
 import { log } from "../lib/logger.js";
 
@@ -46,6 +47,14 @@ export type EnrichmentStats = {
   apiCalls: number;
   notFound: number;
   errors: number;
+  bpm: {
+    eligible: number;   // tracks with null BPM from Tidal
+    cacheHits: number;
+    apiCalls: number;
+    found: number;
+    notFound: number;
+    errors: number;
+  };
 };
 
 export type MusicBrainzClient = {
@@ -53,10 +62,15 @@ export type MusicBrainzClient = {
   getArtistGenres(mbid: string): Promise<ArtistGenres>;
 };
 
+export type GetSongBPMClient = {
+  lookupTrack(artist: string, title: string): Promise<TrackBPM>;
+};
+
 export type EnrichmentOptions = {
   cache: EnrichmentCache;
   mbClient: MusicBrainzClient;
-  onProgress?: (done: number, total: number, artist: string) => void;
+  bpmClient?: GetSongBPMClient | undefined;
+  onProgress?: ((done: number, total: number, artist: string) => void) | undefined;
 };
 
 /**
@@ -67,7 +81,7 @@ export async function enrichTracks(
   tracks: Track[],
   options: EnrichmentOptions
 ): Promise<{ tracks: Track[]; stats: EnrichmentStats }> {
-  const { cache, mbClient, onProgress } = options;
+  const { cache, mbClient, bpmClient, onProgress } = options;
 
   const stats: EnrichmentStats = {
     tracks: tracks.length,
@@ -77,6 +91,14 @@ export async function enrichTracks(
     apiCalls: 0,
     notFound: 0,
     errors: 0,
+    bpm: {
+      eligible: 0,
+      cacheHits: 0,
+      apiCalls: 0,
+      found: 0,
+      notFound: 0,
+      errors: 0,
+    },
   };
 
   // Step 1: Dedupe artists — one lookup per unique normalized name
@@ -141,23 +163,84 @@ export async function enrichTracks(
     }
   }
 
-  // Step 3: Apply enrichment data to tracks
+  // Step 3: BPM enrichment — fill gaps where Tidal returned null BPM
+  const bpmMap = new Map<number, TrackBPM | "not_found">();
+
+  if (bpmClient) {
+    const needsBPM = tracks.filter((t) => t.audio_features.bpm === null);
+    stats.bpm.eligible = needsBPM.length;
+
+    for (const track of needsBPM) {
+      // Check cache first
+      const cached = cache.getBPM(track.id);
+      if (cached !== null) {
+        stats.bpm.cacheHits++;
+        if (cached === "not_found") {
+          bpmMap.set(track.id, "not_found");
+        } else {
+          bpmMap.set(track.id, cached);
+          if (cached.bpm !== null) stats.bpm.found++;
+          else stats.bpm.notFound++;
+        }
+        continue;
+      }
+
+      // API lookup
+      try {
+        stats.bpm.apiCalls++;
+        const result = await withRetry(
+          () => bpmClient.lookupTrack(track.artist, track.title),
+          `bpm "${track.artist} - ${track.title}"`
+        );
+
+        if (result.bpm !== null || result.key !== null) {
+          cache.setBPM(track.id, track.artist, track.title, result);
+          bpmMap.set(track.id, result);
+          stats.bpm.found++;
+        } else {
+          cache.setBPMNotFound(track.id, track.artist, track.title);
+          bpmMap.set(track.id, "not_found");
+          stats.bpm.notFound++;
+        }
+      } catch (err) {
+        stats.bpm.errors++;
+        log(`[enrich] BPM failed for "${track.artist} - ${track.title}": ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
+  // Step 4: Apply enrichment data to tracks
   const enrichedTracks = tracks.map((track, idx) => {
     const artistName = trackArtists[idx]!;
-    const data = artistMap.get(artistName);
+    const artistData = artistMap.get(artistName);
+    const bpmData = bpmMap.get(track.id);
 
-    if (!data || data === "not_found") return track;
+    const hasArtist = artistData && artistData !== "not_found";
+    const hasBPM = bpmData && bpmData !== "not_found" && (bpmData.bpm !== null || bpmData.key !== null);
 
-    return {
-      ...track,
-      enrichment: {
-        artist_mbid: data.mbid,
-        artist_genres: data.genres,
-        artist_genre_votes: data.votes,
-        enriched_at: new Date().toISOString(),
-        enrichment_sources: ["musicbrainz" as const],
-      },
+    if (!hasArtist && !hasBPM) return track;
+
+    const sources: string[] = [];
+    const enrichment: Track["enrichment"] = {
+      enriched_at: new Date().toISOString(),
+      enrichment_sources: sources,
     };
+
+    if (hasArtist) {
+      enrichment.artist_mbid = artistData.mbid;
+      enrichment.artist_genres = artistData.genres;
+      enrichment.artist_genre_votes = artistData.votes;
+      sources.push("musicbrainz");
+    }
+
+    if (hasBPM) {
+      if (bpmData.bpm !== null) enrichment.getsongbpm_bpm = bpmData.bpm;
+      if (bpmData.key !== null) enrichment.getsongbpm_key = bpmData.key;
+      if (bpmData.timeSignature !== null) enrichment.getsongbpm_time_sig = bpmData.timeSignature;
+      sources.push("getsongbpm");
+    }
+
+    return { ...track, enrichment };
   });
 
   return { tracks: enrichedTracks, stats };

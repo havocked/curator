@@ -32,11 +32,15 @@ function formatTrackList(tracks: Track[]): string[] {
             track.duration % 60
           ).padStart(2, "0")}`
         : "?:??";
+    // Prefer Tidal BPM, fall back to GetSongBPM enrichment
+    const effectiveBpm = track.audio_features?.bpm ?? track.enrichment?.getsongbpm_bpm ?? null;
+    const effectiveKey = track.audio_features?.key ?? track.enrichment?.getsongbpm_key ?? null;
+    const bpmSource = track.audio_features?.bpm != null ? "" : (track.enrichment?.getsongbpm_bpm != null ? "~" : "");
     const bpm =
-      track.audio_features?.bpm != null
-        ? `${Math.round(track.audio_features.bpm)} BPM`
+      effectiveBpm != null
+        ? `${bpmSource}${Math.round(effectiveBpm)} BPM`
         : null;
-    const key = track.audio_features?.key ?? null;
+    const key = effectiveKey;
     const features =
       bpm || key ? ` [${[bpm, key].filter(Boolean).join(", ")}]` : "";
     const genres =
