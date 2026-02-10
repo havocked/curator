@@ -15,7 +15,7 @@
     "type": "git",
     "url": "git+https://github.com/havocked/curator.git"
   },
-  "keywords": [],
+  "keywords": ["music", "curation", "playlist", "musicbrainz", "genre", "discovery", "cli"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

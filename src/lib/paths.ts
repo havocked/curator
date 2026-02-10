@@ -16,5 +16,5 @@ export function defaultConfigPath(): string {
 }
 
 export function defaultDatabasePath(): string {
-  return path.join(os.homedir(), "clawd", "projects", "curator", "data", "curator.db");
+  return path.join(os.homedir(), ".local", "share", "curator", "curator.db");
 }
