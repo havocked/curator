@@ -1,68 +1,73 @@
 # Curator
 
 A CLI-first music curation toolkit for building intelligent playlists from Tidal's catalog.
-Uses the official `@tidal-music/api` SDK exclusively — no Python, no community libraries.
+
+Discovers tracks, enriches them with real genre data from MusicBrainz, filters and arranges by energy — then pushes playlists straight to Tidal. Fully pipe-friendly.
 
 ## Quick Start
 
 ```bash
-cd ~/clawd/projects/curator
+git clone https://github.com/havocked/curator.git
+cd curator
 npm install && npm run build
+npm link  # makes `curator` available globally
 
-# Login to Tidal (one-time)
-node dist/cli.js auth login
+# Set up Tidal credentials (one-time)
+# You need a Tidal client ID + secret from https://developer.tidal.com
+mkdir -p ~/.config/curator
+cat > ~/.config/curator/credentials.json << 'EOF'
+{ "clientId": "YOUR_CLIENT_ID", "clientSecret": "YOUR_CLIENT_SECRET" }
+EOF
+
+# Login to Tidal (opens browser)
+curator auth login
 
 # Discover tracks by genre
-node dist/cli.js discover --genre "french electro" --limit 20 --preview
+curator discover --genre "french electro" --limit 20 --preview
 
-# Full pipeline: Discover → Arrange → Create Playlist on Tidal
-node dist/cli.js discover --genre "latin jazz" --limit 20 --format ids | \
-  node dist/cli.js playlist create --name "Latin Jazz Mix"
+# Full pipeline: Discover → Arrange → Create Playlist
+curator discover --artists "Khruangbin,Bonobo,Tycho" --format json | \
+  curator arrange --arc gentle_rise --max-per-artist 2 | \
+  curator export --format tidal | \
+  curator playlist create --name "Chill Vibes"
 ```
 
 ## Commands
 
-### `auth` — OAuth Session Management
+### `discover` — Find Tracks
 
+The primary discovery engine. Multiple source modes, composable with filters.
+
+**By artist(s)** — top tracks per artist (max 20 per artist, API limit):
 ```bash
-curator auth login     # Opens browser for Tidal PKCE login
-curator auth status    # Show current session info
-curator auth logout    # Clear stored credentials
+curator discover --artists "Justice,Daft Punk,Moderat" --limit-per-artist 5 --preview
 ```
 
-### `discover` — Find Tracks from Tidal Catalog
-
-The primary discovery engine. Multiple source modes, all composable with filters.
-
+**By genre** — finds artists tagged with that genre on MusicBrainz, then fetches their tracks from Tidal:
 ```bash
-# By genre/style (keyword search on Tidal catalog)
-curator discover --genre "french electro" --limit 20
-curator discover --genre "jazz" --tags "vocal,modern" --limit 15
+curator discover --genre "house" --limit 30 --preview
+curator discover --genre "jazz" --tags "vocal,modern" --limit 15 --preview
+```
 
-# By artist(s) — fetches top tracks (max 20 per artist, API limit)
-curator discover --artists "Justice,Daft Punk,Moderat" --limit-per-artist 5
+**By record label** — MusicBrainz label lookup → artist roster → Tidal tracks:
+```bash
+curator discover --label "Ed Banger Records" --limit-per-artist 3 --preview
+```
 
-# By record label (MusicBrainz lookup → Tidal artist search)
-curator discover --label "Ed Banger Records" --limit-per-artist 3
+**By similar tracks / radio** — Tidal's recommendation engine:
+```bash
+curator discover --similar 251380837 --preview
+curator discover --radio 251380837 --limit 30 --preview
+```
 
-# By similar tracks (Tidal recommendation engine)
-curator discover --similar <track-id>
-
-# By track radio (radio-style playlist from seed track)
-curator discover --radio <track-id>
-
-# By playlist ID
-curator discover --playlist <tidal-playlist-uuid>
-
-# By album ID
-curator discover --album <tidal-album-id>
-
-# By artist's latest album
-curator discover --latest-album "Radiohead"
+**By playlist, album, or latest album:**
+```bash
+curator discover --playlist <tidal-playlist-uuid> --preview
+curator discover --album <tidal-album-id> --preview
+curator discover --latest-album "Radiohead" --preview
 ```
 
 **Filters** (composable, applied post-fetch):
-
 ```bash
 --popularity-min 0.3        # Min popularity (0.0–1.0)
 --popularity-max 0.7        # Max popularity — useful for hidden gems
@@ -70,108 +75,122 @@ curator discover --latest-album "Radiohead"
 --year-max 1999             # Max release year
 --limit-per-artist 3        # Max tracks per artist (default: 5)
 --limit 50                  # Total result cap (default: 50)
+--genre-filter "techno"     # Keep only tracks by artists in this MusicBrainz genre
+--no-enrich                 # Skip MusicBrainz enrichment (faster, no genre data)
 ```
 
 **Output formats:**
-
 ```bash
---format json    # Full track details (default)
+--format json    # Full track details with enrichment (default)
 --format text    # Human-readable list
 --format ids     # Track IDs only, one per line (pipe-friendly)
 --preview        # Alias for --format text
 ```
 
-### `arrange` — Order Tracks with Musical Logic
+### `arrange` — Order Tracks by Energy
 
 Reads JSON from stdin or file. Reorders tracks by energy arc or sort field.
 
 ```bash
-# Energy arc: start chill → build → peak → wind down
-curator discover ... --format json | curator arrange --arc gentle_rise
-
-# Flat sort by tempo or key
+curator discover --artists "Daft Punk" --format json | curator arrange --arc gentle_rise
 curator arrange --by tempo
 curator arrange --by key
-
-# Diversity constraint: max N tracks per artist
-curator arrange --max-per-artist 1
+curator arrange --max-per-artist 1  # Diversity constraint
 ```
 
-**Arcs:** `flat` (default, no reorder), `gentle_rise` (BPM-based energy curve)
+**Arcs:** `flat` (default, no reorder), `gentle_rise` (BPM-based: start chill → build → peak → wind down)
 
-### `playlist create` — Write Playlists to Tidal
+### `playlist create` — Push to Tidal
 
-Reads track IDs from stdin (newline or comma separated). Creates a new playlist on Tidal and adds tracks.
+Reads track IDs from stdin. Creates a new playlist on Tidal.
 
 ```bash
-# Pipe from discover
 curator discover --genre "soul" --format ids | \
   curator playlist create --name "Soul Selection" --description "Curated soul tracks"
 
-# Public playlist
 curator discover --artists "Fela Kuti" --format ids | \
   curator playlist create --name "Fela's Best" --public
 ```
 
-Batches track additions in chunks of 20 (API limit per request).
+### `filter` — Filter Against Your Favorites
+
+Reads JSON from stdin or file. Requires prior `sync` to populate local DB.
+
+```bash
+# Only tracks you DON'T already have (discovery mode)
+curator discover --genre "jazz" --format json | curator filter --discovery
+
+# Only tracks you DO have (familiar mode)
+curator discover --artists "Radiohead" --format json | curator filter --familiar
+```
 
 ### `sync` — Sync Tidal Favorites to Local DB
 
 ```bash
-curator sync --source tidal              # Sync favorites via SDK (direct)
-curator sync --source tidal --via service # Via tidal-service HTTP fallback
-curator sync --source tidal --dry-run    # Preview without writing
+curator sync --source tidal           # Sync favorites
+curator sync --source tidal --dry-run # Preview without writing
 ```
 
-### `filter` — Filter Tracks Against Synced Favorites
-
-Reads JSON from stdin or file. Requires prior `sync` to populate the local DB.
-
-```bash
-# Keep only tracks NOT in favorites (discovery mode)
-curator discover ... --format json | curator filter --discovery
-
-# Keep only tracks IN favorites (familiar mode)
-curator discover ... --format json | curator filter --familiar
-```
-
-### `search` — Query Local SQLite Database
+### `library` — Browse Synced Favorites
 
 Searches the local track cache (populated by `sync` and `discover`).
 
 ```bash
-curator search --favorited              # List favorited tracks
-curator search --favorited --format ids # IDs only
-curator search --favorited --limit 20   # Limit results
+curator library                   # List favorited tracks
+curator library --format ids      # IDs only (pipe-friendly)
+curator library --limit 20        # Limit results
 ```
 
-**Note:** This searches the *local database*, not Tidal's catalog. For catalog search, use `discover --genre`.
+### `cache` — Inspect Enrichment Cache
 
-### `export` — Extract Track IDs from JSON
+MusicBrainz lookups are cached in SQLite to avoid redundant API calls.
+
+```bash
+curator cache stats                       # Cache hit/miss stats
+curator cache list                        # List cached artists + genres
+curator cache list --genre "electronic"   # Filter cached artists by genre
+curator cache list --format json          # JSON output
+curator cache clear                       # Wipe cache (forces re-fetch)
+```
+
+### `export` — Extract Track IDs
 
 Reads JSON from stdin or file. Outputs Tidal track IDs.
 
 ```bash
-curator discover ... --format json | curator export --format tidal
+curator discover --genre "ambient" --format json | curator export --format tidal
 ```
 
-## Track Metadata
+### `auth` — Tidal Authentication
 
-Each discovered track includes:
+```bash
+curator auth login     # Opens browser for Tidal PKCE login
+curator auth status    # Show current session info
+curator auth logout    # Clear stored credentials
+```
 
-| Field | Source | Notes |
-|-------|--------|-------|
-| `id` | Tidal | Numeric track ID |
-| `title` | Tidal | Includes version suffix (e.g., "Remastered") |
-| `artist` | Tidal (included) | Primary artist name |
-| `album` | Tidal (included) | Album title |
-| `duration` | Tidal | Seconds |
-| `release_year` | Album `releaseDate` | May reflect reissue date for compilations |
-| `popularity` | Tidal | 0.0–1.0 scale |
-| `genres` | Tidal | Always empty (API is INTERNAL-only) |
-| `mood` | Tidal (`toneTags`) | Always empty (API is INTERNAL-only) |
-| `audio_features.bpm` | Tidal | Sparse — many tracks return null |
-| `audio_features.key` | Tidal | Sparse — many tracks return null |
+## Genre Enrichment
+
+Tidal's genre/mood API endpoints are internal-only — external apps get empty data. Curator solves this with **MusicBrainz genre enrichment**, enabled by default.
+
+**How it works:**
+1. After discovering tracks, curator extracts unique artist names
+2. Each artist is looked up on MusicBrainz (quoted search, fuzzy matching)
+3. Genre tags are fetched (community-curated, sorted by vote count)
+4. Results are cached in SQLite (30-day TTL for found, 7-day for not-found)
+5. Genres are attached to tracks as `enrichment.artist_genres`
+
+**What you get:**
+```bash
+# Discover electronic tracks, then filter to only house artists
+curator discover --genre "electronic" --genre-filter "house" --preview
+
+# JSON output includes enrichment data
+curator discover --artists "Daft Punk" --limit 5 --format json
+# → enrichment.artist_genres: ["electronic", "house", "french house", "disco"]
+```
+
+**Performance:** First run hits MusicBrainz API (rate-limited to 1 req/sec). Subsequent runs use cache — near-instant.
 
 ## Pipeline Examples
 
@@ -181,126 +200,60 @@ curator discover --genre "trip hop" --year-min 1990 --year-max 1999 \
   --popularity-max 0.5 --format ids | \
   curator playlist create --name "90s Trip Hop Deep Cuts"
 
-# Label showcase with diversity
+# Label showcase with diversity + energy arc
 curator discover --label "Stones Throw" --limit-per-artist 2 --format json | \
   curator arrange --arc gentle_rise --max-per-artist 1 | \
-  curator export --format tidal
+  curator export --format tidal | \
+  curator playlist create --name "Stones Throw Selection"
 
-# Artist's latest album as playlist
-curator discover --latest-album "Tyler, The Creator" --format ids | \
-  curator playlist create --name "Latest Tyler"
-
-# Multi-artist mix, one track each, arranged by energy
+# Multi-artist mix, arranged by energy
 curator discover --artists "Khruangbin,Tame Impala,Melody's Echo Chamber" \
   --limit-per-artist 3 --format json | \
   curator arrange --arc gentle_rise --max-per-artist 1 | \
   curator export --format tidal
 
-# Similar tracks from a seed (Tidal recommendation engine)
+# Genre discovery → filter to subgenre → playlist
+curator discover --genre "electronic" --limit 50 --genre-filter "minimal techno" \
+  --format ids | \
+  curator playlist create --name "Minimal Techno"
+
+# Similar tracks from a seed, chained
 curator discover --similar 251380837 --format ids | \
   curator playlist create --name "Similar Vibes"
-
-# Radio-style playlist from a track
-curator discover --radio 251380837 --limit 30 --format ids | \
-  curator playlist create --name "Radio Mix"
-```
-
-## Project Structure
-
-```
-curator/
-├── src/
-│   ├── cli.ts                    # Entry point, registers all commands
-│   ├── commands/
-│   │   ├── auth.ts               # OAuth login/status/logout (PKCE)
-│   │   ├── discover.ts           # CLI registration + backward-compat exports
-│   │   ├── arrange.ts            # BPM arrangement + artist limiting
-│   │   ├── playlist.ts           # Tidal playlist creation
-│   │   ├── sync.ts               # Favorites sync (SDK or service)
-│   │   ├── filter.ts             # Familiar/discovery filtering
-│   │   ├── search.ts             # Local DB search (favorited only)
-│   │   └── export.ts             # Track ID extraction
-│   ├── discovery/                # Discovery module (separated concerns)
-│   │   ├── runner.ts             # Orchestrator: resolve → filter → persist → format
-│   │   ├── filters.ts            # Track dedup + filtering
-│   │   ├── formatting.ts         # Text/JSON/IDs output formatting
-│   │   ├── types.ts              # DiscoveryContext, DiscoveryResult, TrackFilters
-│   │   ├── index.ts              # Barrel export
-│   │   └── sources/              # One file per discovery source
-│   │       ├── playlist.ts
-│   │       ├── album.ts
-│   │       ├── artists.ts        # Parallel search (concurrency 3) + retry
-│   │       ├── similar.ts
-│   │       ├── radio.ts
-│   │       ├── label.ts
-│   │       └── search.ts
-│   ├── services/
-│   │   ├── tidal/                # Tidal SDK (separated concerns)
-│   │   │   ├── client.ts         # Auth singleton, init, getClient()
-│   │   │   ├── mappers.ts        # Pure transforms: API → Track type
-│   │   │   ├── fetcher.ts        # Batch fetch with rate limiting
-│   │   │   ├── search.ts         # Artist & track search (with empty retry)
-│   │   │   ├── artists.ts        # Top tracks, discography
-│   │   │   ├── albums.ts         # Album tracks
-│   │   │   ├── tracks.ts         # Single track, similar, radio
-│   │   │   ├── playlists.ts      # Playlist CRUD, favorites
-│   │   │   ├── types.ts          # SDK types, constants
-│   │   │   └── index.ts          # Barrel export
-│   │   ├── tidalSdk.ts           # Re-export shim (backward compat)
-│   │   ├── tidalService.ts       # HTTP service fallback (--via service)
-│   │   ├── nodeStorage.ts        # localStorage polyfill for Node.js
-│   │   └── types.ts              # Track, Artist, Album, Playlist types
-│   ├── providers/
-│   │   └── musicbrainz.ts        # Label search + artist roster lookup
-│   ├── lib/
-│   │   ├── config.ts             # YAML config loader
-│   │   ├── paths.ts              # Path helpers
-│   │   ├── retry.ts              # 429 retry + empty-result retry (exponential backoff)
-│   │   ├── concurrent.ts         # Parallel task runner with concurrency limit
-│   │   └── logger.ts             # stderr logger (keeps stdout clean for pipes)
-│   └── db/
-│       ├── index.ts              # SQLite operations
-│       └── schema.ts             # Table definitions
-├── tests/                        # Unit tests
-├── data/
-│   └── curator.db                # Local track cache (SQLite)
-└── references/
-    └── tidal-openapi.json        # Tidal API spec (230 endpoints)
 ```
 
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `~/.config/curator/credentials.json` | Tidal OAuth client ID + secret |
-| `~/.config/curator/auth-storage.json` | Encrypted SDK tokens (auto-managed) |
-| `~/.config/curator/config.yaml` | Optional: override DB path, service URL |
+| `~/.config/curator/credentials.json` | Tidal OAuth client ID + secret (you create this) |
+| `~/.config/curator/auth-storage.json` | SDK tokens (auto-managed after login) |
+| `~/.config/curator/config.yaml` | Optional: override DB path |
+
+**Getting Tidal credentials:** Register at [developer.tidal.com](https://developer.tidal.com) to get a client ID and secret.
+
+## Known Limitations
+
+- **Artist top tracks capped at 20** — Tidal API hard limit. Use `--album` or `--latest-album` for full albums.
+- **BPM/key data is sparse** — Many tracks return null from Tidal, limiting `arrange --arc gentle_rise` effectiveness.
+- **Popularity bias** — Artist top tracks are pre-sorted by popularity. Use `--popularity-max` to find deep cuts.
+- **Album release year** — May reflect reissue/compilation date, not original release.
+- **MusicBrainz rate limit** — 1 request/second. First enrichment run on a large batch can take time. Cached after that.
+
+See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 
 ## Credits & Data Sources
 
 - **[Tidal](https://tidal.com)** — Music catalog, streaming, and playlist management
 - **[MusicBrainz](https://musicbrainz.org)** — Open music encyclopedia for artist genres and label data
 
-## Known Limitations
-
-- **Genre/mood data is internal-only** — Tidal's genre API endpoints require internal access tier. `--genre` does keyword search, not genre-aware filtering.
-- **Artist top tracks capped at 20** — Tidal API ignores `page[limit]` above 20.
-- **BPM/key data is sparse** — Many tracks return null, limiting `arrange --arc gentle_rise` effectiveness.
-- **Popularity bias** — Artist top tracks are pre-sorted by popularity. Use `--popularity-max` to find deep cuts.
-- **Album release year** — May reflect reissue/compilation date, not original release.
-
-See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
-
 ## Development
 
 ```bash
 npm install
 npm run build
-npm test
-
-node dist/cli.js discover --help
-node dist/cli.js arrange --help
-node dist/cli.js playlist --help
+npm test         # 108 tests
+npm link         # Global install
 ```
 
 ## License
