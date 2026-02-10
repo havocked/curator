@@ -1,11 +1,12 @@
-import { getPlaylistTracks } from "../../services/tidalSdk";
+import { getProvider } from "../../services/provider";
 import type { DiscoveryContext, DiscoveryResult } from "../types";
 
 export async function discoverFromPlaylist(
   playlistId: string,
   ctx: DiscoveryContext
 ): Promise<DiscoveryResult> {
-  const tracks = await getPlaylistTracks(playlistId, ctx.limit);
+  const provider = getProvider();
+  const tracks = await provider.getPlaylistTracks(playlistId, ctx.limit);
   return {
     tracks,
     sourceName: "playlist",

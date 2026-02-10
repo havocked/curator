@@ -1,7 +1,7 @@
 import { log } from "../lib/logger";
 import { loadConfig } from "../lib/config";
 import { applySchema, openDatabase, upsertDiscoveredTracks } from "../db";
-import { initTidalClient } from "../services/tidalSdk";
+import { getProvider } from "../services/provider";
 import { filterTracks, filterByGenre, hasActiveFilters } from "./filters";
 import { createEnrichmentCache, enrichTracks } from "../enrichment/index";
 import { createMusicBrainzClient } from "../providers/musicbrainz";
@@ -170,8 +170,8 @@ export async function runDiscover(options: DiscoverOptions): Promise<void> {
 
   const ctx: DiscoveryContext = { limit, limitPerArtist };
 
-  // Init Tidal once before any source resolution
-  await initTidalClient();
+  // Verify a music provider is configured before source resolution
+  getProvider();
 
   // 1. Resolve source → tracks
   const result = await resolveSource(options, ctx);

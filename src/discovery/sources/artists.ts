@@ -1,9 +1,6 @@
 import { log } from "../../lib/logger";
 import { runConcurrent } from "../../lib/concurrent";
-import {
-  getArtistTopTracks,
-  searchArtists,
-} from "../../services/tidal";
+import { getProvider } from "../../services/provider";
 import type { Track } from "../../services/types";
 import { dedupeTracks } from "../filters";
 import type { DiscoveryContext, DiscoveryResult } from "../types";
@@ -14,11 +11,12 @@ async function resolveArtistTracks(
   names: string[],
   limitPerArtist: number
 ): Promise<Track[]> {
-  // Step 1: Search all artists in parallel
+  const provider = getProvider();
+
   log(`[discover] Searching ${names.length} artists (concurrency: ${ARTIST_CONCURRENCY})...`);
   const searchResults = await runConcurrent(
     names.map((name) => async () => {
-      const artist = await searchArtists(name);
+      const artist = await provider.searchArtists(name);
       if (artist) {
         log(`[discover] Found: ${name} (ID: ${artist.id})`);
       } else {
@@ -35,11 +33,10 @@ async function resolveArtistTracks(
 
   if (artists.length === 0) return [];
 
-  // Step 2: Get top tracks for all artists in parallel
   log(`[discover] Getting tracks for ${artists.length} artists...`);
   const trackGroups = await runConcurrent(
     artists.map((artist) => async () => {
-      const tracks = await getArtistTopTracks(artist.id, limitPerArtist);
+      const tracks = await provider.getArtistTopTracks(artist.id, limitPerArtist);
       log(`[discover] ${artist.name}: ${tracks.length} tracks`);
       return tracks;
     }),
